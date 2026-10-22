@@ -95,6 +95,21 @@
 - **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
 - **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
+### Constitution-Mandated Requirements *(include each that applies)*
+
+<!--
+  Per .specify/memory/constitution.md. State WHAT, not HOW; mark unknowns NEEDS CLARIFICATION.
+-->
+
+- **Finding categories** (Principle II): Which of detected violation / needs manual review /
+  AI explanation / proposed fix / verified outcome does this feature show, and how are they
+  kept distinct? No compliance claims.
+- **Untrusted targets** (Principle III): Does the feature fetch or render user-supplied URLs
+  or page content? If so, state the blocked-target and limit behavior users will see.
+- **AI usage** (Principles I, V): What may AI add, and what happens when AI is unavailable?
+- **Data & retention** (Principle IX): What website/user data is stored, and for how long?
+- **Limits** (Principle IX): User-visible limits (pages per audit, scans per period, etc.).
+
 ### Key Entities *(include if feature involves data)*
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]

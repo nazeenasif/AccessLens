@@ -1,0 +1,331 @@
+openapi: 3.1.0
+info:
+  title: AccessLens Public API (MVP)
+  version: 1.3.0
+  description: |
+    Served by the Next.js web app (Node runtime). No authentication in the MVP; all endpoints are
+    rate-limited per client IP. The server persists no audit history (FR-033).
+    Authoritative shapes: data-model.md and packages/shared Zod schemas; this contract mirrors them.
+    Versioning: breaking changes require a new path prefix (/api/v2); additive fields allowed.
+    Outcome semantics (data-model.md): an audit attempt ends as `result` (status complete or
+    partial) or `error` (no valid results, no Audit). AI availability never changes audit status.
+servers:
+  - url: /api
+paths:
+  /audits:
+    post:
+      operationId: createAudit
+      summary: Audit one public page; streams progress then exactly one result or error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url]
+              properties:
+                url: { type: string, minLength: 1, maxLength: 2048, description: "Scheme optional; https assumed." }
+      responses:
+        "200":
+          description: |
+            NDJSON stream, one AuditEvent per line. Exactly one terminal event (`result` or
+            `error`) ends the stream. URL-policy failures detected before scanning also use this
+            stream with an `error` event so the client has one parsing path.
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/AuditEvent" }
+        "400":
+          description: Malformed JSON body (INVALID_REQUEST).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorBody" }
+        "429":
+          description: RATE_LIMITED — audit rate limit exceeded (before any scanning).
+          headers:
+            Retry-After: { schema: { type: integer, minimum: 0 }, description: Seconds until allowed. }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorBody" }
+        "503":
+          description: SCAN_DISABLED — live scanning is turned off (kill switch or security gate not passed); the demo remains available.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorBody" }
+  /explain:
+    post:
+      operationId: explainFinding
+      summary: On-demand AI explanation and suggested fix for one signed violation (FR-022, FR-022a).
+      description: |
+        The server verifies `evidenceSignature` over the canonical form of `evidence`
+        (research R6) and builds the AI prompt only from the verified `evidence` object.
+        Check order: size → per-IP limit → schema → version/kid → MAC → expiry → per-audit cap →
+        daily cap → AI.
+        Every refusal before the AI step makes no provider call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExplainRequest" }
+      responses:
+        "200":
+          description: Validated AI annotation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExplainResponse" }
+        "400": { description: "INVALID_REQUEST (schema failure, unknown keys)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorBody" } } } }
+        "403": { description: "EVIDENCE_INVALID (bad version, unknown kid, MAC mismatch, future-dated) or EVIDENCE_EXPIRED (> 7 days)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorBody" } } } }
+        "413": { description: "PAYLOAD_TOO_LARGE (> 64 KB)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorBody" } } } }
+        "429":
+          description: EXPLAIN_RATE_LIMITED (per IP, counts all attempts), AUDIT_AI_LIMIT_REACHED (per-audit cap, AI_EXPLAINS_PER_AUDIT, verified requests only), or AI_BUDGET_EXHAUSTED (global daily cap, verified requests only).
+          headers:
+            Retry-After: { schema: { type: integer, minimum: 0 } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/ErrorBody" } } }
+        "502": { description: "AI_INVALID_OUTPUT (discarded per FR-017)", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorBody" } } } }
+        "503": { description: "AI_UNAVAILABLE / AI_TIMEOUT / AI_DISABLED", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorBody" } } } }
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: Liveness and dependency status (no secrets, no key ids).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, scanning, scanner, ai]
+                properties:
+                  status: { enum: [ok, degraded] }
+                  scanning: { enum: [enabled, disabled] }
+                  scanner: { enum: [up, down] }
+                  ai: { enum: [configured, disabled] }
+components:
+  schemas:
+    ErrorCode:
+      type: string
+      enum:
+        # URL / destination (FR-001–FR-005)
+        - INVALID_URL
+        - UNSUPPORTED_SCHEME
+        - CREDENTIALS_IN_URL
+        - PORT_NOT_ALLOWED
+        - BLOCKED_DESTINATION
+        - BLOCKED_REDIRECT
+        - TOO_MANY_REDIRECTS
+        # Target behavior — used only when NO valid results exist (research R5)
+        - TARGET_UNREACHABLE
+        - TARGET_HTTP_ERROR
+        - NOT_HTML
+        - NAVIGATION_TIMEOUT    # no document committed within the navigation limit
+        - AUDIT_TIMEOUT         # axe analysis did not finish within its 20 s budget / total limit
+        - LIMIT_EXCEEDED        # request/byte cap reached before a document committed
+        - DOM_TOO_LARGE         # > SCAN_MAX_DOM_ELEMENTS (default 50 000) or measurement > 2 s; axe not run (research R15)
+        # Capacity / availability
+        - RATE_LIMITED
+        - SCANNER_BUSY
+        - SCANNER_FAILURE
+        - SCAN_DISABLED
+        # Explain
+        - INVALID_REQUEST
+        - PAYLOAD_TOO_LARGE
+        - EVIDENCE_INVALID
+        - EVIDENCE_EXPIRED
+        - EXPLAIN_RATE_LIMITED
+        - AUDIT_AI_LIMIT_REACHED  # per-audit Explain cap (research R6 step 7)
+        - AI_BUDGET_EXHAUSTED
+        - AI_INVALID_OUTPUT
+        - AI_UNAVAILABLE
+        - AI_TIMEOUT
+        - AI_DISABLED
+    ErrorBody:
+      type: object
+      required: [code, message]
+      additionalProperties: false
+      properties:
+        code: { $ref: "#/components/schemas/ErrorCode" }
+        message: { type: string, description: "User-safe; never contains secrets, stack traces, or internal hosts." }
+        retryAfterSeconds: { type: integer, minimum: 0 }
+        detail: { type: object, description: "Optional safe context, e.g. { httpStatus: 404 } or { blockedHost: \"internal.example\" }." }
+    PartialReason:
+      type: string
+      enum: [navigation_timeout, request_limit_reached, byte_limit_reached, frames_not_inspected, subresources_blocked]
+    Impact:
+      type: string
+      enum: [critical, serious, moderate, minor]
+    AuditEvent:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [type, stage]
+          properties:
+            type: { const: progress }
+            stage: { enum: [validating, queued, loading, analyzing] }
+            queuePosition: { type: integer, minimum: 1 }
+        - type: object
+          additionalProperties: false
+          required: [type, audit]
+          properties:
+            type: { const: result }
+            audit: { $ref: "#/components/schemas/Audit" }
+        - type: object
+          additionalProperties: false
+          required: [type, error]
+          properties:
+            type: { const: error }
+            error: { $ref: "#/components/schemas/ErrorBody" }
+    Audit:
+      type: object
+      additionalProperties: false
+      required: [id, submittedUrl, finalUrl, startedAt, completedAt, status, partialReasons, engine, summary, blockedRequests, limitations, findings]
+      properties:
+        id: { type: string, format: uuid }
+        submittedUrl: { type: string, maxLength: 2048 }
+        finalUrl: { type: string, maxLength: 2048 }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        status: { enum: [complete, partial] }
+        partialReasons:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/PartialReason" }
+        engine:
+          type: object
+          additionalProperties: false
+          required: [name, version, tags]
+          properties:
+            name: { const: axe-core }
+            version: { type: string }
+            tags: { type: array, items: { type: string }, description: "Exactly the selected tags in research R2." }
+        summary:
+          type: object
+          additionalProperties: false
+          required: [critical, serious, moderate, minor, bestPractice, manualReview, passesCount]
+          properties:
+            critical: { type: integer, minimum: 0 }
+            serious: { type: integer, minimum: 0 }
+            moderate: { type: integer, minimum: 0 }
+            minor: { type: integer, minimum: 0 }
+            bestPractice: { type: integer, minimum: 0, description: "Subset of violations with isBestPractice." }
+            manualReview: { type: integer, minimum: 0 }
+            passesCount: { type: integer, minimum: 0 }
+        blockedRequests:
+          type: object
+          additionalProperties: false
+          required: [count, sampleHosts]
+          properties:
+            count: { type: integer, minimum: 0 }
+            sampleHosts: { type: array, maxItems: 5, items: { type: string } }
+        limitations: { type: array, items: { type: string } }
+        findings: { type: array, items: { $ref: "#/components/schemas/Finding" } }
+      allOf:
+        - if: { properties: { status: { const: partial } } }
+          then: { properties: { partialReasons: { minItems: 1 } } }
+          else: { properties: { partialReasons: { maxItems: 0 } } }
+    Finding:
+      type: object
+      additionalProperties: false
+      required: [id, kind, ruleId, impact, category, isBestPractice, wcag, help, description, helpUrl, nodes, omittedNodeCount]
+      properties:
+        id: { type: string, pattern: "^[0-9a-f]{16}$" }
+        kind: { enum: [violation, manual_review] }
+        ruleId: { type: string }
+        impact: { enum: [critical, serious, moderate, minor, null] }
+        category: { type: string }
+        isBestPractice: { type: boolean }
+        wcag: { type: array, items: { type: string } }
+        help: { type: string }
+        description: { type: string }
+        helpUrl: { type: string, format: uri }
+        nodes: { type: array, minItems: 1, maxItems: 25, items: { $ref: "#/components/schemas/AffectedNode" } }
+        omittedNodeCount: { type: integer, minimum: 0 }
+        evidence: { $ref: "#/components/schemas/SignedEvidenceV1" }
+        evidenceSignature: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+      allOf:
+        - if: { properties: { kind: { const: violation } } }
+          then:
+            required: [evidence, evidenceSignature]
+            properties: { impact: { $ref: "#/components/schemas/Impact" } }
+          else:
+            not: { anyOf: [ { required: [evidence] }, { required: [evidenceSignature] } ] }
+        - if: { properties: { isBestPractice: { const: true } } }
+          then: { properties: { wcag: { maxItems: 0 } } }
+    AffectedNode:
+      type: object
+      additionalProperties: false
+      required: [target, selector, html, failureSummary]
+      properties:
+        target: { type: array, minItems: 1, items: { type: string } }
+        selector: { type: string }
+        html: { type: string, maxLength: 501, description: "≤ 500 chars + 1-char ellipsis when truncated." }
+        failureSummary: { type: string, maxLength: 1001 }
+    SignedEvidenceV1:
+      description: |
+        Exactly the values the AI prompt may use (research R6). Signed by the web service with
+        HMAC-SHA256 over "accesslens.evidence.v1\n" + JCS-subset canonical JSON of this object.
+        Clients store and resend it verbatim; they never construct or modify it.
+      type: object
+      additionalProperties: false
+      required: [v, kid, auditId, findingId, kind, ruleId, impact, help, description, wcag, isBestPractice, finalUrl, nodes, nodesOmitted, issuedAt]
+      properties:
+        v: { const: 1 }
+        kid: { type: string, pattern: "^[0-9a-f]{8}$" }
+        auditId: { type: string, format: uuid }
+        findingId: { type: string, pattern: "^[0-9a-f]{16}$" }
+        kind: { const: violation }
+        ruleId: { type: string, maxLength: 100 }
+        impact: { $ref: "#/components/schemas/Impact" }
+        help: { type: string, maxLength: 500 }
+        description: { type: string, maxLength: 1000 }
+        wcag: { type: array, maxItems: 10, items: { type: string, maxLength: 10 } }
+        isBestPractice: { type: boolean }
+        finalUrl: { type: string, maxLength: 2048 }
+        nodes:
+          type: array
+          minItems: 1
+          maxItems: 5
+          description: "Server-side bounded reduction; combined node text ≤ 6000 chars (enforced by verifier after MAC check)."
+          items:
+            type: object
+            additionalProperties: false
+            required: [selector, html, failureSummary]
+            properties:
+              selector: { type: string, maxLength: 500 }
+              html: { type: string, maxLength: 501 }
+              failureSummary: { type: string, maxLength: 1001 }
+        nodesOmitted: { type: integer, minimum: 0 }
+        issuedAt: { type: string, format: date-time, description: "UTC, second precision, 'Z' suffix." }
+    ExplainRequest:
+      type: object
+      additionalProperties: false
+      required: [evidence, evidenceSignature]
+      properties:
+        evidence: { $ref: "#/components/schemas/SignedEvidenceV1" }
+        evidenceSignature: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+    ExplainResponse:
+      type: object
+      additionalProperties: false
+      required: [auditId, findingId, explanation, suggestedFix, needsHumanJudgment, provider, model, generatedAt]
+      properties:
+        auditId: { type: string, format: uuid }
+        findingId: { type: string }
+        explanation:
+          type: object
+          additionalProperties: false
+          required: [summary, whoIsAffected, whyItMatters]
+          properties:
+            summary: { type: string, minLength: 1, maxLength: 600 }
+            whoIsAffected: { type: string, minLength: 1, maxLength: 400 }
+            whyItMatters: { type: string, minLength: 1, maxLength: 600 }
+        suggestedFix:
+          type: object
+          additionalProperties: false
+          required: [language, code, notes]
+          properties:
+            language: { enum: [html, css, aria] }
+            code: { type: string, minLength: 1, maxLength: 2000 }
+            notes: { type: string, maxLength: 600 }
+        needsHumanJudgment: { type: boolean }
+        provider: { type: string }
+        model: { type: string }
+        generatedAt: { type: string, format: date-time }

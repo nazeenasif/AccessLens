@@ -68,7 +68,7 @@ The tasks.md should be immediately executable - each task must be specific enoug
 
 **CRITICAL**: Tasks MUST be organized by user story to enable independent implementation and testing.
 
-**Tests are OPTIONAL**: Only generate test tasks if explicitly requested in the feature specification or if user requests TDD approach.
+**Tests are REQUIRED** (constitution Principle VI): For every user story, generate test tasks that precede implementation — unit, integration, security (when the story touches URL handling, scanning, secrets, or LLM calls), and e2e for the primary journey. Include known-violation fixture tests and re-scan verification of proposed fixes where feasible. Tests MUST NOT call live LLM providers or live third-party sites.
 
 ### Checklist Format (REQUIRED)
 

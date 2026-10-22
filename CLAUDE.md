@@ -208,3 +208,8 @@ Wait for consent; never auto-create ADRs. Group related decisions (stacks, authe
 
 ## Code Standards
 See `.specify/memory/constitution.md` for code quality, testing, performance, security, and architecture principles.
+
+## Active Technologies
+- 001-accesslens-mvp: TypeScript on Node.js 24 LTS; Next.js 16.4 (App Router), React 19.3, Tailwind CSS 4.3, Radix UI, Zod 4.6, Playwright 1.64 + @axe-core/playwright 4.14, ipaddr.js, idb, pino; Vitest 5, Playwright Test, msw
+- Storage: browser IndexedDB only — the server persists no audit data
+- Layout: npm workspaces `apps/web`, `services/scanner` (separate hardened container), `packages/shared`; Docker Compose

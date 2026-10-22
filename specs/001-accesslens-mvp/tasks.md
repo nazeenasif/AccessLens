@@ -1,0 +1,1001 @@
+---
+
+description: "Task list for AccessLens MVP (001-accesslens-mvp)"
+---
+
+# Tasks: AccessLens MVP — Single-Page Accessibility Audit & AI Remediation
+
+**Input**: Design documents from `/specs/001-accesslens-mvp/` (plan.md, spec.md, research.md R1–R15,
+data-model.md, contracts/, quickstart.md) and ADR-0001/0002/0003 (all Accepted).
+**Prerequisites**: plan.md, spec.md (both present).
+
+**Tests**: REQUIRED (constitution Principle VI). Each story's test tasks come first and must be
+confirmed **failing** before implementation. No test calls a live AI provider or a live
+third-party site. Scanner tests use local fixtures through the test-only allowlist
+(`EGRESS_TEST_ALLOWLIST`, honored only when `NODE_ENV=test`).
+
+**Gates**: G0 (URL policy), G1 (network boundary, run on a firewall-equipped Linux host), G2
+(scanner fixtures and benchmark), and G3 (evidence tampering). A gate passes **only** when its
+run is recorded with evidence in `specs/001-accesslens-mvp/gate-evidence.md`. **No gate has
+passed at the time of writing.** `SCAN_ENABLED` stays `false` in every environment until G0 and
+G1 evidence exists for that host.
+
+**Execution order = priority order** (constitution VII): Setup → Foundational (M1, M2, M3) →
+US1 (P1) → US2 (P2) → US4 (P3) → US5 (P4) → US3 (P5) → Polish. The stories were re-prioritized
+on 2026-10-22 because the demo tour (US3) covers comparison (US4) and export (US5). US1 also
+includes evidence **sealing**, because the public contract requires `evidence` and
+`evidenceSignature` on every violation in `/api/audits` results; US2 keeps verification and
+Explain.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: can run in parallel (different files, no dependency on an incomplete task)
+- **[Story]**: US1–US5 (user-story phases only)
+- Paths are relative to the repository root `D:\Naz\Projects\AccessLens\`
+
+---
+
+## Phase 1: Setup — Milestone M0 (Shared Infrastructure)
+
+**Purpose**: Monorepo, toolchain, Compose skeleton per ADR-0001, the M0 tests from ADR-0003, and
+CI.
+
+- [ ] T001 Create root `package.json`:
+  - npm workspaces `apps/web`, `services/scanner`, `services/egress-proxy`, `packages/shared`;
+  - `"engines": { "node": ">=24 <25" }`;
+  - scripts `test`, `test:unit`, `test:integration`, `test:security`, `test:g1`, `test:wcag`,
+    `bench:axe`, `test:e2e`, `check:secrets`, `typecheck`, `lint`;
+  - also create `.nvmrc` containing `24`.
+- [ ] T002 [P] Create `.gitignore` covering `node_modules/`, `.next/`, `coverage/`,
+  `test-results/`, `.env`, `.env.*`, and `!.env.example`.
+- [ ] T003 [P] Create `.env.example` with a placeholder for every variable in quickstart §2:
+  - no real values;
+  - `SCAN_ENABLED=false`, `AI_PROVIDER=openrouter`;
+  - comment lines naming which service receives each variable, per the ADR-0001 secret table.
+- [ ] T004 [P] Create `specs/001-accesslens-mvp/gate-evidence.md` with an empty ledger table:
+  Gate, Date, Host/Runner, Commit, Command, Result, Evidence link.
+- [ ] T005 **Decision OD-9 (TypeScript version)**:
+  - create a minimal skeleton (`tsconfig.base.json`, one file per workspace) with
+    `typescript@7.0.2`;
+  - run `next build` type-checking, ESLint, and Vitest on it;
+  - if any fails, pin `typescript@5.9.x`;
+  - record the outcome and the pinned version in `specs/001-accesslens-mvp/research.md` (R13)
+    and mark OD-9 resolved in `specs/001-accesslens-mvp/plan.md`.
+- [ ] T006 [P] Configure strict TypeScript in `tsconfig.base.json` (`strict`,
+  `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`), with a
+  `tsconfig.json` in each workspace extending it.
+- [ ] T007 [P] Configure ESLint (flat config) in `eslint.config.mjs`:
+  - forbid `react/no-danger` (`dangerouslySetInnerHTML`), `no-eval`, and `no-implied-eval`;
+  - a `no-restricted-syntax` rule rejecting `process.env.NEXT_PUBLIC_*` names containing `KEY`,
+    `SECRET`, or `TOKEN`;
+  - also add Prettier config in `.prettierrc`.
+- [ ] T008 [P] Configure Vitest projects (unit, integration, security per workspace) in
+  `vitest.workspace.ts`.
+- [ ] T009 [P] Scaffold `packages/shared/package.json` (exact `zod@4.6.7`, `ipaddr.js@2.5.0`) and
+  `packages/shared/src/index.ts`.
+- [ ] T010 [P] Scaffold `services/egress-proxy/package.json` (no browser dependencies) and
+  `services/egress-proxy/src/main.ts` (placeholder entrypoint).
+- [ ] T011 [P] Scaffold `services/scanner/package.json` (exact `playwright@1.64.1`,
+  `@axe-core/playwright@4.14.0`, `axe-core@4.14.0`) and `services/scanner/src/main.ts`.
+- [ ] T012 [P] Scaffold the Next.js 16.4 app in `apps/web/`:
+  - App Router, `output: "standalone"` in `apps/web/next.config.ts`;
+  - React 19.3, Tailwind CSS 4.3, Radix UI primitives;
+  - `apps/web/src/app/layout.tsx` with `lang="en"`.
+- [ ] T013 [P] Vendor Playwright's seccomp profile from
+  `microsoft/playwright` `utils/docker/seccomp_profile.json` at tag `v1.64.1` into
+  `ops/seccomp/playwright-seccomp-profile.json`, recording the source URL and commit SHA in
+  `ops/seccomp/SOURCE.md`.
+- [ ] T014 Write the Compose configuration test in `tests/config/compose.test.ts`. It parses
+  `docker-compose.yml` and asserts every item in ADR-0003's "Compose configuration test" list:
+  - no `ports` on `scanner` or `egress-proxy`;
+  - `scan-ctl`/`scan-egress` are `internal: true`;
+  - `outbound` has `enable_ipv6: false` and a fixed subnet;
+  - fixed `egress-proxy` IP on `scan-egress`;
+  - scanner `init: true`, `shm_size` set, no `ipc: host`, `read_only`, `cap_drop: [ALL]`,
+    `no-new-privileges`, seccomp profile path;
+  - per-service env allowlists match ADR-0001;
+  - `web` has `read_only: true` with `tmpfs` only for `/tmp` and the Next.js runtime cache, and
+    no volumes (ADR-0002 §6);
+  - one replica each.
+
+  Confirm it fails.
+- [ ] T015 [P] Create `apps/web/Dockerfile` (multi-stage, pinned Node 24 slim tag, non-root
+  runtime user, standalone output).
+- [ ] T016 [P] Create `services/scanner/Dockerfile` (`FROM
+  mcr.microsoft.com/playwright:v1.64.1-noble`, runtime `USER pwuser`).
+- [ ] T017 [P] Create `services/egress-proxy/Dockerfile` (multi-stage, pinned Node 24 slim tag,
+  non-root runtime user, no browser).
+- [ ] T018 Create `docker-compose.yml` per ADR-0001 §1/§4 so that T014 passes:
+  - networks `public`, `scan-ctl` (internal), `scan-egress` (internal, fixed subnet), and
+    `outbound` (fixed IPv4 subnet, `enable_ipv6: false`);
+  - `web` publishes 3000, with `read_only: true`, `tmpfs` for `/tmp` and the Next.js runtime
+    cache, and no volumes;
+  - scanner hardening (non-root, seccomp profile from T013, `init`, `shm_size: 1g` provisional
+    until T093, read-only rootfs + `tmpfs /tmp`, resource limits);
+  - `egress-proxy` with a fixed IP;
+  - env allowlists per service.
+- [ ] T019 Write the `web` binding test in `tests/config/web-binding.test.ts`. On the composed
+  stack it asserts that `web` accepts TCP on its `public` address and refuses TCP on its
+  `scan-ctl` address. Confirm it fails.
+- [ ] T020 Configure `web`'s listener to bind only to its `public`-network address (Next.js
+  standalone `HOSTNAME`, set from the container's `public` interface at start) in
+  `apps/web/docker-entrypoint.sh` and `docker-compose.yml`, making T019 pass.
+- [ ] T021 **Decision OD-11 (conditional)**: only if T019 can't pass, write a superseding ADR in
+  `history/adr/0004-scanner-control-network-fallback.md` choosing between a separate control
+  network and a reversed control connection, and update `docker-compose.yml`. Otherwise mark
+  OD-11 "not needed" in `specs/001-accesslens-mvp/plan.md`.
+- [ ] T022 [P] Add a `dev` Compose profile in `docker-compose.yml` that runs `web` with `next
+  dev` and a source bind-mount **inside** Compose, with no scanner or proxy ports published.
+  Record the exact command in `specs/001-accesslens-mvp/quickstart.md` §3.
+- [ ] T023 [P] Write the build secret-scan script `scripts/check-secrets.mjs` (greps
+  `apps/web/.next/static` for secret env var names and the `sk-or-` prefix; non-zero exit on a
+  hit) and its test `tests/config/check-secrets.test.ts`.
+- [ ] T024 [P] Write the image-user test `tests/config/images-nonroot.test.ts`: builds each
+  image and asserts its runtime UID ≠ 0 and base image tags are pinned (no `latest`).
+- [ ] T025 **Decision OD-8a (CI platform)**: choose the CI platform (the repository needs a
+  remote) and record it as an addendum in `history/adr/0003-stack-and-deployment.md` and in the
+  OD-8 row of `specs/001-accesslens-mvp/plan.md`. Where G1 runs is decided separately in T047.
+- [ ] T026 Create the CI pipeline config at the path the T025 platform requires. It runs
+  `npm ci`, `lint`, `typecheck`, `test:unit`, `test:integration`, `test:security`,
+  `check:secrets`, the `tests/config` suite, and a **diff/history secret scan**
+  (`npm run check:secrets:diff`). That scan checks every pushed commit range for key-like
+  values, including the `sk-or-` prefix, base64 secrets of 32 bytes or more, and private keys.
+  The scanner tool is chosen together with the T025 CI platform and recorded in the same
+  ADR-0003 addendum. The pipeline runs with no live AI and no external sites.
+- [ ] T027 Write the diff secret-scan verification test `tests/config/diff-secret-scan.test.ts`:
+  - it creates a temporary git repository with a commit containing a fake `sk-or-` key and a
+    fake 48-byte base64 secret, and asserts `npm run check:secrets:diff` fails on it;
+  - a clean commit and `.env.example` placeholders pass;
+  - add the `check:secrets:diff` script to the root `package.json`.
+
+  This closes the constitution merge-gate item "no secrets in diff".
+- [ ] T028 [P] Create the root `README.md` (purpose, architecture summary linking ADR-0001–0003,
+  setup, env vars, test commands, `SCAN_ENABLED=false` notice, data retention) from
+  `specs/001-accesslens-mvp/quickstart.md`.
+
+**Checkpoint M0**: CI green; T005, T014, T019, T023, T024, and T027 pass; `/api/health` isn't built
+yet.
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites) — Shared Model, M1, M2, M3
+
+**⚠️ CRITICAL**: No user-story work starts until this phase is complete. Public scanning stays
+disabled throughout.
+
+### 2a. Shared schemas and wording (used by every story)
+
+- [ ] T029 [P] Write schema tests in `packages/shared/tests/unit/schemas.test.ts` covering:
+  - `Audit`: `partialReasons` non-empty iff `status="partial"`; summary counts equal recomputed
+    findings;
+  - `Finding`: non-null `impact` for violations; `evidence`/`evidenceSignature` present iff
+    violation (web output) and absent in scanner output; `wcag` empty when `isBestPractice`;
+    16-hex `id`;
+  - `AffectedNode` length limits (501/1001);
+  - `SignedEvidenceV1` field limits (≤ 5 nodes, selector ≤ 500, help ≤ 500,
+    description ≤ 1000).
+- [ ] T030 [P] Write the OpenAPI conformance test `packages/shared/tests/unit/openapi-conformance.test.ts`.
+  Using a JSON Schema 2020-12 validator, it checks that valid and invalid sample payloads produce
+  the same verdict from the Zod schemas and from
+  `specs/001-accesslens-mvp/contracts/public-api.openapi.yaml` components.
+- [ ] T031 [P] Write wording tests in `packages/shared/tests/unit/wording.test.ts`:
+  - the limitations statement mentions automated coverage limits, manual testing with assistive
+    technology, no conformance certification, and the WCAG 2.2 gap;
+  - every `PartialReason` has an explanation;
+  - `findBannedClaims()` flags "compliant", "fully accessible", "certified", and equivalents.
+- [ ] T032 Implement the Zod schemas in `packages/shared/src/schemas/`:
+  - `audit.ts`, `finding.ts`, `evidence.ts`, `events.ts` (NDJSON `AuditEvent`), `explain.ts`;
+  - `errors.ts`: the `ErrorCode` enum, including `DOM_TOO_LARGE`, `SCAN_DISABLED`, and every
+    Explain code;
+  - match `specs/001-accesslens-mvp/data-model.md` so that T029–T030 pass.
+- [ ] T033 Implement `packages/shared/src/wording.ts` (limitations statement, partial-reason
+  explanations, banned-claims list and `findBannedClaims()`), making T031 pass.
+
+### 2b. Milestone M1 — URL / destination policy (Gate G0)
+
+- [ ] T034 [P] Write normalization tests in `packages/shared/tests/unit/url-normalize.test.ts`:
+  - a missing scheme becomes `https://`; fragments are stripped; IDN becomes punycode;
+  - length > 2048 → `INVALID_URL`;
+  - non-http(s) → `UNSUPPORTED_SCHEME`;
+  - `user:pass@` → `CREDENTIALS_IN_URL`;
+  - ports other than 80/443 → `PORT_NOT_ALLOWED`.
+- [ ] T035 [P] Write IP classification tests in `packages/shared/tests/unit/ip-classify.test.ts`:
+  - every range in ADR-0001 §3, plus `::1`, `fc00::/7`, `fe80::/10`, and IPv4-mapped IPv6;
+  - decimal, octal, and hex IPv4 encodings;
+  - public examples are allowed.
+- [ ] T036 [P] Write the G0 destination case list in
+  `packages/shared/tests/security/destination-cases.ts` (the published SC-003 list: direct,
+  encoded, DNS-resolved, and redirect-target cases) and the suite
+  `packages/shared/tests/security/g0-destination.test.ts`. The suite uses a stub resolver and
+  asserts:
+  - any non-public answer → `BLOCKED_DESTINATION`;
+  - a mixed public + private answer is blocked;
+  - an IPv6-only answer → `TARGET_UNREACHABLE` (IPv4-only egress per ADR-0001).
+- [ ] T037 Implement `packages/shared/src/url-policy/normalize.ts` and
+  `packages/shared/src/url-policy/validate-url.ts` (T034 passes).
+- [ ] T038 Implement `packages/shared/src/url-policy/ip-classify.ts`, exporting the single
+  `NON_PUBLIC_IPV4_RANGES` list and `isPublicIPv4()` (T035 passes).
+- [ ] T039 Implement `packages/shared/src/url-policy/resolve-and-check.ts` (injectable resolver,
+  IPv4 `all: true`; any non-public → block), making T036 pass.
+- [ ] T040 **Run Gate G0**: run `npm run test:security -- g0` and `npm run test:unit` in CI,
+  then record the run in `specs/001-accesslens-mvp/gate-evidence.md` (commit, run link,
+  result).
+
+**Checkpoint G0**: passed only if T040 recorded a green run.
+
+### 2c. Milestone M2 — Egress proxy and network isolation (Gate G1)
+
+- [ ] T041 [P] Write credential-registry tests in
+  `services/egress-proxy/tests/unit/credentials.test.ts`: register/revoke; unknown or revoked →
+  407; auto-expiry after `SCAN_TOTAL_TIMEOUT_MS`; per-audit byte and request counters.
+- [ ] T042 [P] Write control-endpoint tests in `services/egress-proxy/tests/unit/control.test.ts`:
+  - a missing or wrong `PROXY_CONTROL_TOKEN` → 401 (constant-time compare);
+  - read-only per-audit views; no other audit's credentials are ever returned;
+  - rate-limited.
+- [ ] T043 [P] Write proxy behavior tests in
+  `services/egress-proxy/tests/integration/proxy.test.ts`:
+  - `CONNECT` only to :443, HTTP only to :80;
+  - IPv4-only resolve-once;
+  - any non-public answer → refusal, with the blocked host recorded;
+  - **rebinding**: a stub resolver changes its answer after the first lookup, and the proxy
+    still connects to the first validated IP;
+  - request and byte caps → further requests refused and the cap flag set.
+- [ ] T044 [P] Write startup safety tests in `services/egress-proxy/tests/security/startup.test.ts`
+  and `services/scanner/tests/security/startup.test.ts`: the process exits non-zero if
+  `EGRESS_TEST_ALLOWLIST` is set outside `NODE_ENV=test`, or if `PROXY_CONTROL_TOKEN` is missing.
+- [ ] T045 [P] Write the range-sync test `packages/shared/tests/unit/firewall-sync.test.ts`:
+  `ops/firewall/nonpublic-ipv4.txt` equals `NON_PUBLIC_IPV4_RANGES` from T038.
+- [ ] T046 [P] Write proxy logging tests in `services/egress-proxy/tests/unit/logging.test.ts`:
+  one `proxy.audit_summary` per audit (requests, bytes, blocked count, cap flags) and
+  `proxy.blocked` (reason, hashed host). The serialized logs contain no URLs, paths, query
+  strings, or tokens (research R14).
+- [ ] T047 **Decision OD-8b (where G1 runs)**: choose and provision the Linux host or runner
+  (Docker Engine plus iptables control) for G1, and record it in
+  `specs/001-accesslens-mvp/plan.md` (the OD-8 row) and in the ADR-0003 addendum.
+- [ ] T048 Implement `services/egress-proxy/src/credentials.ts` (T041).
+- [ ] T049 Implement `services/egress-proxy/src/control.ts` (T042).
+- [ ] T050 Implement `services/egress-proxy/src/proxy.ts`:
+  - uses `isPublicIPv4`/`resolve-and-check` from `packages/shared`;
+  - connects to the validated IP;
+  - 80/443 only;
+  - 407 without credentials;
+  - per-audit accounting;
+  - test allowlist honored only in test mode.
+
+  Makes T043 pass.
+- [ ] T051 Implement `services/egress-proxy/src/main.ts` (config validation from T044, starts
+  the proxy and control listeners on the `scan-egress` address).
+- [ ] T052 Implement `services/egress-proxy/src/logger.ts` (pino with the R14 redaction set) and
+  emit the R14 proxy events from `proxy.ts`/`credentials.ts`, making T046 pass.
+- [ ] T053 [P] Write browser-launch tests in `services/scanner/tests/unit/browser.test.ts`:
+  - launch args include `--proxy-bypass-list=<-loopback>`,
+    `--host-resolver-rules=MAP * ~NOTFOUND`, `--disable-quic`, and
+    `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`;
+  - never `--no-sandbox`;
+  - one browser per concurrency slot;
+  - recycle after 50 audits;
+  - each context gets per-audit proxy credentials, `acceptDownloads: false`,
+    `serviceWorkers: "block"`, and a 1280×800 viewport.
+- [ ] T054 [P] Write proxy-client tests in `services/scanner/tests/unit/proxy-client.test.ts`:
+  register before the context opens; revoke in `finally`; counters read before the terminal
+  event.
+- [ ] T055 Implement `services/scanner/src/browser.ts` (T053).
+- [ ] T056 Implement `services/scanner/src/proxy-client.ts` (T054).
+- [ ] T057 [P] Write the NL-2 firewall scripts:
+  - `ops/firewall/nonpublic-ipv4.txt` (generated from T038);
+  - `ops/firewall/install-nl2.sh`: `DOCKER-USER` ESTABLISHED/RELATED accept first; DROP from the
+    `outbound` subnet to each listed range and all Docker bridge subnets; an `INPUT` DROP from
+    `outbound` to the host's own addresses;
+  - `ops/firewall/verify-nl2.sh`;
+  - `ops/firewall/accesslens-nl2.service` (systemd unit that re-applies the rules at boot after
+    Docker starts).
+- [ ] T058 [P] Write G1 test `tests/g1/nl1-no-direct-route.test.ts`: from inside `scanner`, a
+  direct TCP connection to a public IP fails, and connections to `169.254.169.254` and RFC 1918
+  targets fail.
+- [ ] T059 [P] Write G1 test `tests/g1/nl1-web-unreachable.test.ts`: from inside `scanner`, a TCP
+  connection to `web`'s `scan-ctl` address is refused.
+- [ ] T060 [P] Write G1 test `tests/g1/nl2-raw-probes.test.ts`: from inside `egress-proxy`, raw
+  TCP probes (bypassing proxy logic) to `169.254.169.254`, each RFC 1918 block, a Docker bridge
+  subnet, and the host's own address are dropped by the host firewall.
+- [ ] T061 [P] Write G1 test `tests/g1/proxy-vectors.test.ts`. Through the production-config
+  proxy it covers:
+  - loopback (`127.0.0.1`, `[::1]`, `localhost`), RFC 1918, metadata, and the container
+    addresses;
+  - encoded IPs and IPv4-mapped IPv6;
+  - a non-80/443 port;
+  - WebRTC and DNS-prefetch attempts from a page;
+  - 407 without credentials and after revocation;
+  - control endpoint 401 without the token.
+- [ ] T062 [P] Write G1 test `tests/g1/dns-and-sandbox.test.ts`: external DNS resolution from
+  inside `scanner` fails; Chromium reports its sandbox enabled; the `scanner` and `egress-proxy`
+  environments contain no `OPENROUTER_*` or `EVIDENCE_SIGNING_*` variables.
+- [ ] T063 [P] Write integration test `services/scanner/tests/integration/redirect-policy.test.ts`
+  (test mode, allowlisted fixture server): a public-fixture → private redirect stops with
+  `BLOCKED_REDIRECT`; more than 10 redirects → `TOO_MANY_REDIRECTS`.
+- [ ] T064 Add the `test:g1` runner `scripts/run-g1.mjs`: it brings up the production-config
+  stack, checks that `verify-nl2.sh` passes, runs `tests/g1/*`, and writes a timestamped
+  evidence log to `ops/evidence/g1-<host>-<date>.log`.
+- [ ] T065 **Decision OD-10 (conditional)**: if T062's DNS check shows external resolution,
+  choose a mitigation, implement it in `docker-compose.yml`, and add an addendum to
+  `history/adr/0001-scanner-isolation-and-egress-control.md`. Otherwise mark OD-10 "not needed"
+  in `specs/001-accesslens-mvp/plan.md`.
+- [ ] T066 **Run Gate G1** on the T047 host with `ops/firewall/install-nl2.sh` applied: run
+  `npm run test:g1` and record the evidence log in `specs/001-accesslens-mvp/gate-evidence.md`.
+  Re-run after any daemon or host restart.
+
+**Checkpoint G1**: passed only if T066 recorded a green run on that host.
+
+### 2d. Milestone M3 — Scanner service, fixtures only (Gate G2)
+
+- [ ] T067 [P] Create the WCAG fixture pages and expectations in `fixtures/pages/wcag/`:
+  `f-20a.html`, `f-20aa.html`, `f-21a.html`, `f-21aa.html`, `f-22aa.html`, `f-bp.html`,
+  `f-obs.html`, `f-clean.html`, each with a `*.expected.json` (must-report / must-not-report
+  rules per research R2).
+- [ ] T068 [P] Create the rule-inventory snapshot `fixtures/axe/rule-inventory.4.14.0.json` (91
+  effective rule IDs plus tags, per research R2).
+- [ ] T069 [P] Create the interruption fixtures in `fixtures/pages/interruptions/`:
+  - a slow-`load` page (document commits, `load` never fires);
+  - a no-document page (server never responds);
+  - request-heavy (> 300 requests);
+  - byte-heavy (> 15 MB);
+  - a cross-origin frame page;
+  - a blocked-subresource page (subresource on a non-80/443 port);
+  - a slow-axe page.
+- [ ] T070 [P] Create the DOM-limit fixtures in `fixtures/pages/dom-limit/`: `49999.html`,
+  `50001.html`, `two-frames-30k-30k.html`, and `shadow-root-large.html`.
+- [ ] T071 [P] Create the test-only fixture server `tests/support/fixture-server.ts`, serving
+  `fixtures/` and the redirect/slow endpoints for T063 and T069.
+- [ ] T072 [P] Write mapping unit tests in `services/scanner/tests/unit/map-axe.test.ts`:
+  - violations → `violation`; incomplete → `manual_review`;
+  - category from `cat.*`; `isBestPractice` rule;
+  - WCAG parse (`wcag1410` → `1.4.10`);
+  - truncation to 500/1000 + "…";
+  - 25-node cap and `omittedNodeCount`; finding `id` = sha256(kind:ruleId)[0..16];
+  - `impact` null only for `manual_review`.
+- [ ] T073 [P] Write config tests in `services/scanner/tests/unit/config.test.ts`:
+  - startup is rejected when nav + analysis + teardown > total;
+  - `SCAN_MAX_DOM_ELEMENTS` must be within 1 000–200 000;
+  - the defaults are 30/20/5/60 s and 50 000.
+- [ ] T074 [P] Write DOM-measure unit tests in `services/scanner/tests/unit/dom-measure.test.ts`:
+  early stop at limit + 1, open shadow roots counted, a running total across frames, and the 2 s
+  timeout → over-limit.
+- [ ] T075 [P] Write WCAG coverage integration tests in
+  `services/scanner/tests/integration/wcag-fixtures.test.ts`:
+  - each F-20A … F-CLEAN page yields exactly its must-report rules and none of its must-not-report
+    rules;
+  - F-INV: the effective rule set equals `fixtures/axe/rule-inventory.4.14.0.json`;
+  - engine `tags` equal the R2 set.
+- [ ] T076 [P] Write outcome-mapping integration tests in
+  `services/scanner/tests/integration/outcomes.test.ts`, one per research R5 table row:
+  - `navigation_timeout` partial / `NAVIGATION_TIMEOUT` error;
+  - request/byte cap partial / `LIMIT_EXCEEDED`;
+  - `frames_not_inspected`; `subresources_blocked`;
+  - `DOM_TOO_LARGE` with axe **not** invoked; `AUDIT_TIMEOUT` on the slow-axe page;
+  - `SCANNER_FAILURE` on a crash;
+  - `partialReasons` non-empty iff partial.
+- [ ] T077 [P] Create the target-response fixtures in `fixtures/pages/target-responses/` and the
+  fixture-server routes in `tests/support/fixture-server.ts`: a 404 page, a 500 page, a PDF
+  (`application/pdf`), a `Content-Disposition: attachment` HTML response, a connection-refused
+  port, and a stub-resolver NXDOMAIN host.
+- [ ] T078 [P] Write target-response integration tests in
+  `services/scanner/tests/integration/target-responses.test.ts` (research R5 rows):
+  - 404/500 → `TARGET_HTTP_ERROR` with `detail.httpStatus` and axe **not** invoked;
+  - PDF or attachment → `NOT_HTML`;
+  - NXDOMAIN, refused, or TLS failure → `TARGET_UNREACHABLE`;
+  - no Audit object for any of these.
+- [ ] T079 [P] Create the page-control fixtures in `fixtures/pages/controls/`, one page each
+  for:
+  - `window.open` popup, and a scripted `target=_blank` click;
+  - `alert`/`confirm`/`prompt`/`beforeunload`;
+  - geolocation, notifications, and camera permission requests;
+  - an auto-download link;
+  - `location.href` change after load, and a meta-refresh to another page;
+  - auto-submitting form;
+  - a page that sets a cookie and `localStorage` marker.
+- [ ] T080 [P] Write page-control security tests in
+  `services/scanner/tests/security/page-controls.test.ts` (research R4 table, constitution III,
+  FR-006/FR-008). For each T079 fixture, assert:
+  - popups are closed and only one page is ever audited;
+  - dialogs are dismissed;
+  - permissions are denied;
+  - no download is written;
+  - no second main-frame document request reaches the proxy (navigation away and form
+    submission are blocked);
+  - the audit completes on the original document, with the "navigated away" / popup notes in
+    `limitations`;
+  - the cookie and `localStorage` marker set in audit N are absent in audit N+1.
+- [ ] T081 [P] Write scanner logging tests in `services/scanner/tests/unit/logging.test.ts`:
+  `audit.slot_acquired`, `audit.navigation_done`, `audit.dom_measured`, `audit.axe_done`, and
+  `audit.outcome` are emitted with durations and codes, and contain no HTML, URLs, evidence, or
+  tokens (research R14).
+- [ ] T082 [P] Write `/scan` server tests in `services/scanner/tests/integration/server.test.ts`:
+  - 401 without `X-Scanner-Token`;
+  - re-validates the URL (rejects private destinations even when `web` is bypassed);
+  - NDJSON event order `queued` → `loading` → `analyzing` → exactly one terminal event;
+  - queue full → 503 `SCANNER_BUSY`;
+  - findings carry no `evidence`.
+- [ ] T083 [P] Write budget tests in `services/scanner/tests/integration/budget.test.ts`:
+  - `t0` starts at slot acquisition (queue wait excluded);
+  - an analysis timeout emits `AUDIT_TIMEOUT` before teardown;
+  - a hung context is killed after 5 s and only its slot's browser is relaunched, while the other
+    slot's audit completes.
+- [ ] T084 [P] Create the benchmark fixtures in `fixtures/pages/benchmark/` (≈1k, 10k, 25k, and
+  50k elements, contrast-heavy, multi-frame).
+- [ ] T085 Implement `services/scanner/src/config.ts` (T073).
+- [ ] T086 Implement `services/scanner/src/map-axe.ts` (T072).
+- [ ] T087 Implement `services/scanner/src/dom-measure.ts` (TreeWalker per frame, early stop,
+  2 s bound), making T074 pass.
+- [ ] T088 Implement `services/scanner/src/logger.ts` (pino with the R14 redaction set) for the
+  scanner lifecycle events.
+- [ ] T089 Implement `services/scanner/src/page-controls.ts`, applied by `scan.ts` to every
+  audit context (research R4 table):
+  - close pages other than the audited one;
+  - dismiss dialogs;
+  - `permissions: []`;
+  - `acceptDownloads: false`;
+  - `page.route` aborts any main-frame document request after the initial navigation settles,
+    and records limitation notes.
+- [ ] T090 Implement `services/scanner/src/scan.ts`:
+  - navigation with redirect counting;
+  - target-response classification (`TARGET_UNREACHABLE`, `TARGET_HTTP_ERROR`, `NOT_HTML`)
+    before analysis;
+  - DOM measure → `DOM_TOO_LARGE`;
+  - axe with the exact R2 tags under the 20 s budget;
+  - read proxy counters;
+  - R5 outcome mapping;
+  - lifecycle events through T088;
+  - revoke credentials and tear down within 5 s.
+
+  Makes T075, T076, T083, T063, T078, T080, and T081 pass.
+- [ ] T091 Implement `services/scanner/src/server.ts` (`/scan` NDJSON, `/healthz`, token auth,
+  slot pool and queue), making T082 pass.
+- [ ] T092 Implement the benchmark `services/scanner/bench/axe-bench.ts` and the `bench:axe`
+  script: 20 runs per T084 fixture in the hardened container; writes p50/p95 to
+  `fixtures/benchmark/results-4.14.0.json`; fails if p95 at 50k > 15 s.
+- [ ] T093 Measure the final `shm_size` (moved from M2 because it needs the T084 fixtures and the
+  T090 scanner): run the benchmark and heavy fixtures in the hardened scanner container and set
+  the final `shm_size` in `docker-compose.yml` (M2 used a provisional `1g`). Record the value
+  and method in `specs/001-accesslens-mvp/research.md` R4.
+- [ ] T094 **Run Gate G2**: run `npm run test:wcag`, the scanner integration tests, and
+  `npm run bench:axe`, then record the results in `specs/001-accesslens-mvp/gate-evidence.md`.
+  If the benchmark misses, stop and amend the plan (lower `SCAN_MAX_DOM_ELEMENTS` or raise the
+  budget). Defaults are not silently changed.
+
+**Checkpoint G2**: foundation ready. User stories can begin. Public scanning is still disabled.
+
+---
+
+## Phase 3: User Story 1 — Audit one public page and review findings (Priority: P1) 🎯 MVP
+
+**Goal**: Submit a URL, see progress, then a dashboard of engine findings with evidence,
+manual-review items, best-practice labelling, and every outcome state. Audits are saved locally,
+and each violation carries sealed evidence.
+
+**Independent Test**: In test mode, submit the seeded fixture URL and check:
+- the expected findings, severities, categories, selectors, and evidence appear;
+- manual review is separated and best-practice findings are labelled;
+- a private-network URL is refused before any load;
+- each outcome state renders;
+- the saved audit survives a reload.
+
+### Tests for User Story 1 (REQUIRED — write first, must FAIL) ⚠️
+
+- [ ] T095 [P] [US1] Canonical JSON tests in `packages/shared/tests/unit/canonical-json.test.ts`:
+  RFC 8785 examples within the subset; throws on `null`/`undefined`/float; key-order
+  independence; array-order sensitivity; no Unicode normalization.
+- [ ] T096 [P] [US1] Evidence reduction tests in `packages/shared/tests/unit/evidence-reduce.test.ts`:
+  - at most 5 nodes, node text ≤ 6 000 chars, at least one node kept;
+  - `failureSummary` trimmed to fit;
+  - `nodesOmitted` includes `omittedNodeCount`;
+  - selector ≤ 500, help ≤ 500, description ≤ 1000;
+  - deterministic output.
+- [ ] T097 [P] [US1] Sealing tests in `apps/web/tests/unit/evidence-seal.test.ts`:
+  - MAC = HMAC-SHA256 over `"accesslens.evidence.v1\n"` + canonical JSON, base64url, 43 chars;
+  - `kid` = first 8 hex chars of SHA-256(key);
+  - `issuedAt` in UTC at second precision;
+  - only violations are sealed.
+- [ ] T098 [P] [US1] Client-IP and rate-limit tests in `apps/web/tests/unit/rate-limit.test.ts`:
+  socket IP by default; `X-Forwarded-For` honored only per `TRUSTED_PROXY_HOPS`; fail-closed
+  without an IP; 5 audits per 10 min → `RATE_LIMITED` with `Retry-After`.
+- [ ] T099 [P] [US1] Logger redaction tests in `apps/web/tests/unit/logger.test.ts`:
+  `authorization`, `*.apiKey`, `*.evidenceSignature`, the tokens, and cookies are redacted; no
+  page content or evidence is logged.
+- [ ] T100 [P] [US1] Contract tests for `POST /api/audits` in
+  `apps/web/tests/integration/api-audits.test.ts`, with a stubbed scanner stream:
+  - NDJSON events validate against `AuditEvent`;
+  - URL-policy errors arrive as stream `error` events;
+  - `SCAN_ENABLED=false` → 503 `SCAN_DISABLED`;
+  - 429 with `Retry-After`;
+  - complete, partial, and error results are relayed;
+  - every violation carries valid `evidence` and `evidenceSignature`; manual-review findings
+    carry none.
+- [ ] T101 [P] [US1] Health contract test in `apps/web/tests/integration/api-health.test.ts`:
+  `{status, scanning, scanner, ai}`; `scanning: "disabled"` by default; no secrets or key ids.
+- [ ] T102 [P] [US1] NDJSON reader tests in `apps/web/tests/unit/audit-stream.test.ts`: split
+  lines across chunks; malformed lines; exactly one terminal event.
+- [ ] T103 [P] [US1] Local storage tests in `apps/web/tests/unit/storage.test.ts` (with
+  `fake-indexeddb`):
+  - complete and partial audits are saved with `expiresAt = completedAt + 7d`;
+  - errors are never saved;
+  - in-memory fallback with `historyAvailable=false` when IndexedDB throws;
+  - **stored-shape assertions (FR-032)**: every persisted record validates against the shared
+    schema with no extra keys; no field holds full page HTML (each `html` ≤ 501 chars, each
+    `failureSummary` ≤ 1001); no screenshot or binary data, cookies, request headers, or form
+    values; at most 25 nodes per finding.
+- [ ] T104 [P] [US1] Dashboard component tests in `apps/web/tests/unit/dashboard.test.tsx`:
+  - severity grouping and summary counts (incl. `bestPractice`, `manualReview`);
+  - category filter;
+  - best-practice label "Best practice — not a WCAG requirement" with no WCAG mapping;
+  - a "not mapped" WCAG state;
+  - a separate manual-review section not counted as violations;
+  - snippets rendered as inert text;
+  - the limitations notice is always present.
+- [ ] T105 [P] [US1] State component tests in `apps/web/tests/unit/states.test.tsx`. Each FR-015
+  state renders distinct text: idle, validating, auditing with progress, complete, empty ("No
+  automated violations detected" + limitations), partial with every reason explanation, timeout
+  with retry, blocked destination, blocked redirect, unreachable, page returned an error (shows
+  the status), not a web page, page too large, rate-limited, scanning disabled, busy. None uses
+  banned wording.
+- [ ] T106 [P] [US1] No-persistence security test in
+  `apps/web/tests/security/no-persistence.test.ts` (ADR-0002 §6, FR-033, SC-012 server side).
+  Against the composed stack in test mode, run an audit and an Explain, then assert:
+  - no files changed in the `web` container outside its `tmpfs` mounts;
+  - `web` logs contain no snippet, evidence, or AI text;
+  - `apps/web/package.json` contains no database or cache client dependencies (denylist check).
+- [ ] T107 [P] [US1] Security test in `apps/web/tests/security/headers.test.ts`: the CSP blocks
+  inline scripts and external origins; no `dangerouslySetInnerHTML` in the build (lint
+  assertion); `server-only` modules aren't in the client bundle.
+- [ ] T108 [P] [US1] E2E test in `e2e/us1-audit.spec.ts`, against Compose in test mode with the
+  fixture server and the allowlist:
+  - submit `f-20a`; see progress; see expected findings and evidence; the saved audit persists
+    after reload;
+  - a private URL is refused; `/demo` stays reachable while scanning is disabled;
+  - the partial (slow-load), page-too-large, and timeout fixtures show their states.
+- [ ] T109 [P] [US1] Self-audit and responsive E2E in `e2e/us1-a11y.spec.ts`: axe (WCAG A/AA)
+  finds zero violations on the form, progress, dashboard, finding detail, and every state; the
+  flow works keyboard-only; status changes are announced through `aria-live`; no horizontal
+  scroll at 320 px; reduced motion is respected.
+
+### Implementation for User Story 1
+
+- [ ] T110 [P] [US1] Implement `packages/shared/src/canonical-json.ts` (T095).
+- [ ] T111 [P] [US1] Implement `packages/shared/src/evidence-reduce.ts` (T096).
+- [ ] T112 [US1] Implement `apps/web/src/server/evidence-seal.ts` (`server-only`; current key
+  from `EVIDENCE_SIGNING_SECRET`; startup fails if the key is missing or < 32 bytes), making T097
+  pass.
+- [ ] T113 [P] [US1] Implement `apps/web/src/server/logger.ts` (pino with the redaction paths
+  from research R14), making T099 pass.
+- [ ] T114 [P] [US1] Implement `apps/web/src/server/client-ip.ts` and
+  `apps/web/src/server/rate-limit.ts` (in-memory fixed window, fail-closed), making T098 pass.
+- [ ] T115 [P] [US1] Implement `apps/web/src/server/scanner-client.ts` (POSTs `/scan` over
+  `SCANNER_URL` with `X-Scanner-Token`, parses NDJSON, validates each event with the shared
+  schema).
+- [ ] T116 [US1] Implement `apps/web/src/app/api/audits/route.ts` (Node runtime):
+  - checks `SCAN_ENABLED` → `SCAN_DISABLED`;
+  - applies the rate limit;
+  - runs the URL policy (T037–T039);
+  - relays the scanner stream;
+  - seals every violation with T111/T112 before relaying the `result`.
+
+  Makes T100 pass.
+- [ ] T117 [P] [US1] Implement `apps/web/src/app/api/health/route.ts` (T101).
+- [ ] T118 [P] [US1] Implement `apps/web/src/lib/audit-stream.ts` (T102).
+- [ ] T119 [P] [US1] Implement `apps/web/src/lib/storage.ts`: IndexedDB `accesslens` v1 with
+  `audits` and `aiAnnotations` stores; save; purge expired audits on app start; memory
+  fallback (T103).
+- [ ] T120 [P] [US1] Implement the dashboard components in `apps/web/src/components/dashboard/`:
+  `Summary.tsx`, `FindingGroups.tsx`, `CategoryFilter.tsx`, `ManualReview.tsx`,
+  `LimitationsNotice.tsx`, and `PartialBanner.tsx` (reasons + coverage explanations from
+  `wording.ts`) (T104).
+- [ ] T121 [P] [US1] Implement `apps/web/src/components/finding-detail/FindingDetail.tsx` (rule,
+  severity, category, description, selectors, inert snippet, failure summary, guidance link, WCAG
+  or "not mapped", best-practice label).
+- [ ] T122 [P] [US1] Implement the state components in `apps/web/src/components/states/`, one
+  file per FR-015 state with `aria-live` announcements (T105).
+- [ ] T123 [US1] Implement `apps/web/src/app/page.tsx`: URL form showing the normalized URL;
+  live audit view through `audit-stream`; saves complete/partial audits; navigates to the saved
+  audit view.
+- [ ] T124 [US1] Implement `apps/web/src/app/audits/[id]/page.tsx`: reads the audit from
+  IndexedDB and renders the dashboard and finding detail, with a "history not saved" notice when
+  storage is unavailable.
+- [ ] T125 [US1] Configure security headers and a nonce-based CSP in `apps/web/next.config.ts`
+  and `apps/web/src/middleware.ts` (T107).
+- [ ] T126 [US1] Update `README.md` and `specs/001-accesslens-mvp/quickstart.md` with the
+  verified US1 commands.
+
+### Release prerequisites for User Story 1 (public scanning)
+
+- [ ] T127 [US1] **Decision OD-2 (VM/VPS provider and region)**: choose a provider that
+  satisfies ADR-0001 §5 and record it in the ADR-0003 addendum and the OD-2 row of
+  `specs/001-accesslens-mvp/plan.md`.
+- [ ] T128 [US1] **Decision OD-7 (TLS reverse proxy)**: choose one, record it in the ADR-0003
+  addendum, and add its config under `ops/reverse-proxy/`. It must forward one hop
+  (`TRUSTED_PROXY_HOPS=1`) and must not log request bodies.
+- [ ] T129 [US1] Deploy to the T127 host:
+  - install `ops/firewall/accesslens-nl2.service`;
+  - run `npm run test:g1` there and record G0 + G1 evidence for **that host** in
+    `specs/001-accesslens-mvp/gate-evidence.md`;
+  - only then set `SCAN_ENABLED=true` in that host's environment.
+
+**Checkpoint US1**: US1 is fully functional. MVP is deliverable once T129's evidence is recorded.
+
+---
+
+## Phase 4: User Story 2 — AI explanation and suggested fix (Priority: P2)
+
+**Goal**: On-demand "Explain" for one detected violation, built only from verified sealed
+evidence. The output is strictly validated and labelled as AI-generated and unverified, and
+there is a graceful unavailable state.
+
+**Independent Test**: With a stored audit of the seeded page and OpenRouter mocked:
+- "Explain" shows the labelled explanation and fix;
+- tampered, expired, or forged evidence is refused with zero provider calls;
+- invalid output or an outage shows "AI explanation unavailable" while the findings remain
+  usable.
+
+- [ ] T130 [US2] **Decision OD-6 (daily AI cap across restarts)**: choose (a) a provider-side key
+  spending limit (confirm OpenRouter's setting first), (b) a persisted counter, or (c) both.
+  Record it as an addendum in `history/adr/0002-stateless-server-signed-evidence.md` and in the
+  OD-6 row of `specs/001-accesslens-mvp/plan.md`.
+
+### Tests for User Story 2 (REQUIRED — write first, must FAIL) ⚠️
+
+- [ ] T131 [P] [US2] Verification-order unit tests in `apps/web/tests/unit/evidence-verify.test.ts`:
+  size → per-IP limit → strict schema → `v`/`kid` → MAC (`timingSafeEqual`) → expiry/skew →
+  per-audit cap → daily cap. Also covers current and previous key, a removed previous key →
+  `EVIDENCE_INVALID`, 7 days ± 1 s, and future-dated > 60 s.
+- [ ] T132 [P] [US2] Per-audit AI cap tests in `apps/web/tests/unit/audit-cap.test.ts` (research
+  R6 step 7, ADR-0002 Amendment 1, constitution IX):
+  - the 26th verified Explain for one `auditId` → `AUDIT_AI_LIMIT_REACHED` with zero provider
+    calls;
+  - other audits are unaffected;
+  - refused (unverified) attempts don't count;
+  - entries expire after 7 days (fake clock);
+  - the oldest entry is evicted at 50 000 entries;
+  - `AI_EXPLAINS_PER_AUDIT` overrides the default.
+- [ ] T133 [P] [US2] Daily AI cap tests in `apps/web/tests/unit/daily-cap.test.ts` (research
+  R12, ADR-0002, OD-6 via T130):
+  - only verified requests count;
+  - request 501 of the day → `AI_BUDGET_EXHAUSTED` with zero provider calls;
+  - the window resets at 00:00 UTC (fake clock);
+  - `AI_DAILY_REQUEST_CAP` overrides the default;
+  - **restart behavior matches the T130 decision**: for a persisted counter, a simulated `web`
+    restart keeps the count; for a provider-side limit only, the test asserts the documented
+    reset and checks that the deployment checklist in `README.md` requires the provider key
+    limit to be set.
+- [ ] T134 [P] [US2] **G3 tampering suite** in `apps/web/tests/security/explain-tampering.test.ts`.
+  Every case in research R6 is refused, and the provider mock records **zero calls** for each:
+  - each top-level and nested field altered;
+  - an added or removed field;
+  - node reorder, add, or remove;
+  - a Unicode-equivalent string;
+  - a truncated signature;
+  - another finding's signature;
+  - `v: 2`;
+  - expired and future-dated evidence.
+
+  Positive cases: reordered keys and a previous-key signature are accepted.
+- [ ] T135 [P] [US2] Contract tests for `POST /api/explain` in
+  `apps/web/tests/integration/api-explain.test.ts`: request and response validate against the
+  contract; 400/403/413/429/502/503 with the correct codes, including 429
+  `AUDIT_AI_LIMIT_REACHED`; the per-IP limit counts all attempts; the per-audit and daily caps
+  count only verified requests; `AI_PROVIDER=none` → `AI_DISABLED`.
+- [ ] T136 [P] [US2] OpenRouter adapter tests in `apps/web/tests/integration/openrouter.test.ts`,
+  with `msw`:
+  - request to `https://openrouter.ai/api/v1/chat/completions` with Bearer auth, `model`,
+    `max_tokens`, `response_format.json_schema` with `strict: true`,
+    `provider.require_parameters: true`, `provider.data_collection: "deny"`, and the attribution
+    headers;
+  - error mapping: 429/503 retried at most once only if `Retry-After` ≤ 5 s; 402 not retried;
+    401/403 → `config_error`; 408 or abort → `timeout`; 502; a 200 with an `error` body →
+    `invalid_output`;
+  - every call emits one `explain.call` log event (provider, model, duration, prompt and
+    completion tokens, outcome or error kind, retry count) with no evidence or AI text (research
+    R14).
+- [ ] T137 [P] [US2] Output validation tests in `apps/web/tests/unit/ai-output.test.ts`: the
+  `findingId`/`ruleId` echo must match; extra keys are rejected; length limits apply; there is
+  no severity field.
+- [ ] T138 [P] [US2] Prompt-injection test in `apps/web/tests/security/prompt-injection.test.ts`:
+  sealed evidence whose snippet contains instructions aimed at the AI. The prompt keeps evidence
+  as JSON data separate from the instructions; mocked malicious outputs are discarded; engine
+  data is unchanged.
+- [ ] T139 [P] [US2] AI panel component tests in `apps/web/tests/unit/ai-panel.test.tsx`:
+  - "Explain" is shown only on violations; no AI request on load;
+  - a loading state;
+  - "AI-generated" and "Unverified suggestion" labels;
+  - code shown as inert text in a language-labelled block;
+  - unavailable/retry and rate-limited states;
+  - a distinct per-audit "AI explanation limit reached for this audit" state on
+    `AUDIT_AI_LIMIT_REACHED` (FR-021), with no retry offered and engine data still usable;
+  - the cached annotation is reused.
+- [ ] T140 [P] [US2] Storage tests for annotations in `apps/web/tests/unit/storage-annotations.test.ts`:
+  only `available` annotations are persisted; they are deleted with their audit.
+- [ ] T141 [P] [US2] E2E test in `e2e/us2-explain.spec.ts`, against Compose with a mock
+  OpenRouter in test mode: the Explain flow; an outage keeps the findings usable; an expired
+  signature shows "Re-audit to enable explanations"; self-axe on the AI panel.
+
+### Implementation for User Story 2
+
+- [ ] T142 [US2] Implement `apps/web/src/server/evidence-verify.ts` (verification order, key
+  selection by `kid`, `EVIDENCE_SIGNING_SECRET_PREVIOUS`), making T131 and T134 pass.
+- [ ] T143 [P] [US2] Implement `apps/web/src/server/ai/provider.ts` (types per
+  `contracts/ai-provider.ts`) and `apps/web/src/server/ai/factory.ts` (`AI_PROVIDER`:
+  `openrouter` | `none`).
+- [ ] T144 [P] [US2] Implement `apps/web/src/server/ai/prompt.ts`: system prompt treating
+  evidence as untrusted data; `ExplainInput` built only from verified evidence (T138).
+- [ ] T145 [US2] Implement `apps/web/src/server/ai/openrouter.ts` (request shape, timeout via
+  `AbortSignal`, error mapping, Zod re-validation), making T136 and T137 pass. The test-mode
+  base-URL override is honored only when `NODE_ENV=test`.
+- [ ] T146 [US2] Implement `apps/web/src/server/ai/daily-cap.ts` per the T130 decision, making
+  T133 pass.
+- [ ] T147 [US2] Implement `apps/web/src/server/ai/audit-cap.ts` (in-memory per-`auditId`
+  counter with 7-day expiry and a 50 000-entry bound), making T132 pass.
+- [ ] T148 [US2] Implement `apps/web/src/app/api/explain/route.ts` (≤ 64 KB body, verify →
+  per-audit cap → daily cap → provider → validated response, emitting `explain.refused` /
+  `explain.call` events), making T135 pass.
+- [ ] T149 [P] [US2] Implement `apps/web/src/components/ai-panel/AiPanel.tsx` (including the
+  per-audit limit-reached state) and annotation persistence in `apps/web/src/lib/storage.ts`
+  (T139, T140).
+- [ ] T150 [US2] Add a mock-OpenRouter service (test profile only) to `docker-compose.yml` for
+  e2e, and update `specs/001-accesslens-mvp/quickstart.md` with the US2 commands.
+- [ ] T151 [US2] **Run Gate G3**: run the T134 suite in CI and record it in
+  `specs/001-accesslens-mvp/gate-evidence.md`.
+
+**Checkpoint US2**: US1 and US2 work independently. Explain requires a G3 record before release.
+
+---
+
+## Phase 5: User Story 4 — Re-audit and compare results (Priority: P3)
+
+**Goal**: A local history view with 7-day expiry and Clear history, plus re-audit of a saved URL
+with a Remaining / No longer detected / New comparison and comparability warnings.
+
+**Independent Test**: Audit fixture version A, then version B (two issues removed, one added).
+The comparison shows 2 "no longer detected", 1 "new", and the rest "remaining". Clear history
+leaves zero records.
+
+### Tests for User Story 4 (REQUIRED — write first, must FAIL) ⚠️
+
+- [ ] T152 [P] [US4] Create comparison fixtures `fixtures/pages-v2/compare-a.html` and
+  `fixtures/pages-v2/compare-b.html` (B fixes two A violations and adds one), each with
+  `*.expected.json`.
+- [ ] T153 [P] [US4] Compare unit tests in `packages/shared/tests/unit/compare.test.ts`:
+  - occurrence key `kind|ruleId|selector`; each occurrence in exactly one group;
+  - per-group counts by severity;
+  - warnings `final_url_differs`, `partial_audit`, `engine_version_differs`;
+  - selector-change pairs appear as both "no longer detected" and "new".
+- [ ] T154 [P] [US4] Fixture re-scan verification test in
+  `services/scanner/tests/integration/rescan-verification.test.ts`: scanning `compare-b` confirms
+  the two fixed rules no longer fail for their targets (constitution VI re-scan verification on
+  fixtures only).
+- [ ] T155 [P] [US4] History storage tests in `apps/web/tests/unit/history.test.ts`: purge at
+  7 days with a fake clock; Clear history removes all audits and annotations (SC-012); deleting a
+  single audit; re-audit comparison only against locally saved audits.
+- [ ] T156 [P] [US4] Comparison view tests in `apps/web/tests/unit/comparison-view.test.tsx`:
+  "No longer detected" wording with no "fixed" or "verified" claims; warnings rendered;
+  banned-wording check.
+- [ ] T157 [P] [US4] E2E test in `e2e/us4-compare.spec.ts`:
+  - re-audit flow with `compare-a` → `compare-b` (SC-010);
+  - Clear history shows the empty state (SC-012);
+  - an expired or cleared baseline explains that there is nothing to compare;
+  - the history page shows removal dates and the local-only notice (FR-037);
+  - self-axe and 320 px.
+
+### Implementation for User Story 4
+
+- [ ] T158 [US4] Implement `packages/shared/src/compare.ts` (T153).
+- [ ] T159 [P] [US4] Implement `apps/web/src/components/comparison/ComparisonView.tsx` (T156).
+- [ ] T160 [P] [US4] Implement `apps/web/src/app/history/page.tsx`: list of saved audits with
+  removal dates; confirmed Clear history; per-audit delete; local-only notice.
+- [ ] T161 [US4] Add "Re-audit" to `apps/web/src/app/audits/[id]/page.tsx`. It runs a new audit
+  of the same URL and renders `ComparisonView` against the saved baseline.
+- [ ] T162 [US4] Extend `apps/web/src/lib/storage.ts` with delete-one, clear-all, and
+  list-by-URL (T155).
+
+**Checkpoint US4**: US1, US2, and US4 work independently.
+
+---
+
+## Phase 6: User Story 5 — Export an audit report (Priority: P4)
+
+**Goal**: A downloadable, self-contained, accessible HTML report with an accessible print
+stylesheet.
+
+**Independent Test**: Export the seeded audit and check:
+- every dashboard finding, the limitations statement, AI labels, and partial notes are present;
+- the file opens offline with zero network requests and has no scripts;
+- the print layout is readable;
+- there is no compliance wording.
+
+### Tests for User Story 5 (REQUIRED — write first, must FAIL) ⚠️
+
+- [ ] T163 [P] [US5] Export unit tests in `apps/web/tests/unit/export.test.ts`:
+  - output has a `<!doctype html>`, the CSP meta `default-src 'none'; style-src 'unsafe-inline'`,
+    zero `<script>`, and no external resource URLs (help links are plain anchors);
+  - all findings, manual review, the limitations statement, partial reasons, "AI-generated" /
+    "Unverified suggestion" labels (only for generated annotations), and the comparison when
+    present;
+  - no secrets, provider names, or internal identifiers beyond the audit reference (FR-027);
+  - page-derived strings are escaped.
+- [ ] T164 [P] [US5] Banned-wording test on exports in `apps/web/tests/security/export-wording.test.ts`
+  (SC-006), using `findBannedClaims()`.
+- [ ] T165 [P] [US5] E2E test in `e2e/us5-export.spec.ts`:
+  - download the report and open it with network disabled; zero requests (SC-011);
+  - axe on the report finds zero A/AA violations;
+  - `emulateMedia({ media: "print" })`: no navigation chrome, code blocks wrap, severity shown as
+    text, logical heading order, link URLs printed.
+
+### Implementation for User Story 5
+
+- [ ] T166 [P] [US5] Implement `apps/web/src/components/report/ReportDocument.tsx` (static, no
+  client JS) and `apps/web/src/components/report/report.css` (screen and accessible `@media print`
+  rules).
+- [ ] T167 [US5] Implement `apps/web/src/lib/export.ts`: `renderToStaticMarkup`, inline CSS,
+  CSP meta, Blob download; makes T163 and T164 pass.
+- [ ] T168 [US5] Add an "Export report" action to `apps/web/src/app/audits/[id]/page.tsx`,
+  including the comparison when one is shown.
+
+**Checkpoint US5**: US1, US2, US4, and US5 work independently.
+
+---
+
+## Phase 7: User Story 3 — Guided demo (Priority: P5)
+
+*(P5 because the tour covers comparison (US4) and export (US5).)*
+
+**Goal**: A demo with realistic, clearly labelled sample data and an accessible guided tour. It
+makes no URL submission and no live audit or AI call, and works with scanning and AI disabled.
+
+**Independent Test**: With `SCAN_ENABLED=false` and `AI_PROVIDER=none`, complete the tour
+keyboard-only. Every step renders sample data, the "Sample data" label stays visible, and no
+`/api/*` request is made.
+
+### Tests for User Story 3 (REQUIRED — write first, must FAIL) ⚠️
+
+- [ ] T169 [P] [US3] Demo data validation test in `apps/web/tests/unit/demo-data.test.ts`: every
+  demo audit and annotation validates against the shared schemas; AI annotations are labelled
+  AI-generated; there is no banned wording.
+- [ ] T170 [P] [US3] Tour component tests in `apps/web/tests/unit/tour.test.tsx`:
+  - step order: summary → finding evidence → AI explanation and fix → manual review → comparison
+    → export;
+  - skip, exit, and revisit;
+  - focus moves to each step target and returns on exit;
+  - step changes are announced through `aria-live`;
+  - reduced motion is respected.
+- [ ] T171 [P] [US3] E2E test in `e2e/us3-demo.spec.ts`, with scanning and AI disabled:
+  - route interception asserts zero `/api/*` requests;
+  - keyboard-only tour completion;
+  - the persistent "Sample data" label;
+  - the URL form isn't usable inside the demo;
+  - phone viewport (320 px);
+  - self-axe zero violations;
+  - tour completion time recorded for SC-009.
+
+### Implementation for User Story 3
+
+- [ ] T172 [P] [US3] Create the AccessLens-owned demo source page `fixtures/demo-site/index.html`
+  with seeded issues that cover a manual-review item and a best-practice finding, plus a fixed
+  variant `fixtures/demo-site/index-v2.html` for the comparison.
+- [ ] T173 [US3] Implement `scripts/build-demo-data.ts`: scans `fixtures/demo-site/*` through the
+  scanner in test mode and writes `apps/web/src/demo/data/audits.json` (two audits). Evidence is
+  sealed with a **throwaway random key generated at build time and never saved**, so the data
+  satisfies the shared schema, while the server would refuse it with `EVIDENCE_INVALID` (unknown
+  `kid`). Explain is disabled in the demo.
+- [ ] T174 [US3] Create `apps/web/src/demo/data/annotations.json`, AI annotations for selected
+  demo findings, **reviewed by a human for accuracy** before commit. Record the reviewer and date
+  in `apps/web/src/demo/data/REVIEW.md`.
+- [ ] T175 [P] [US3] Implement `apps/web/src/components/tour/Tour.tsx` and
+  `apps/web/src/components/tour/steps.ts` (T170).
+- [ ] T176 [US3] Implement `apps/web/src/app/demo/page.tsx`: loads the bundled demo data; renders
+  the dashboard, `AiPanel` (read-only, no Explain requests), `ComparisonView`, and export of the
+  sample report; shows the "Sample data" label; no network calls (T171).
+
+**Checkpoint US3**: all five stories work independently.
+
+---
+
+## Phase 8: Polish & Cross-Cutting Concerns
+
+- [ ] T177 [P] Repo-wide banned-wording scan `scripts/check-wording.mjs` over UI strings, demo
+  data, and report templates (SC-006), added to CI in the T026 pipeline config.
+- [ ] T178 [P] Large-result performance test in `e2e/perf-large-results.spec.ts`: a fixture
+  with 500+ findings keeps the dashboard interactive (collapsed groups or virtualized lists); the
+  time to results is recorded for SC-001.
+- [ ] T179 [P] Dependency and image audit: `npm audit --omit=dev` plus a pinned-version check
+  across all four workspaces, documented in `README.md`.
+- [ ] T180 [P] Optional governance follow-up: propose a constitution PATCH clarifying Principle
+  III "via request interception" to include proxy/network-layer enforcement, via
+  `/sp.constitution` (owner approval required).
+- [ ] T181 SC-005 usability study:
+  - write the protocol in `specs/001-accesslens-mvp/usability/sc-005-protocol.md`: at least 5
+    developers new to accessibility; each reads the AI explanation for 3 fixed demo findings and
+    then states the problem and the next step in their own words; the pass rule is ≥ 80%
+    correct, scored against a rubric agreed before the sessions;
+  - run the sessions on the demo;
+  - record anonymized results and the pass/fail verdict in
+    `specs/001-accesslens-mvp/usability/sc-005-results.md`;
+  - if it fails, open follow-up tasks to revise the explanation prompt or UI.
+- [ ] T182 Validate `specs/001-accesslens-mvp/quickstart.md` end to end on a clean checkout, and
+  promote the final setup, env, and test commands into `README.md`.
+- [ ] T183 Final gate review: confirm `specs/001-accesslens-mvp/gate-evidence.md` contains G0,
+  G1 (per host), G2, and G3 records, and that `SCAN_ENABLED=true` exists only on hosts with
+  G0 + G1 evidence.
+
+---
+
+## Dependencies & Execution Order
+
+### Phase Dependencies
+
+- **Setup (M0, T001–T028)**: none. T005 (OD-9) comes before T006. T014 → T018 → T019 → T020/T021.
+  T025 → T026.
+- **Foundational**: depends on Setup.
+  - 2a (T029–T033) comes before everything else.
+  - M1 (T034–T040) → G0.
+  - M2 (T041–T066) depends on M1, because the proxy reuses the URL policy. T047 must precede
+    T064/T066. T065 runs after T062 results. M2 uses a provisional `shm_size`.
+  - M3 (T067–T094) depends on M2 (the scanner runs through the proxy). T093 (final `shm_size`)
+    needs the T084 fixtures and T090, and must finish before T094.
+- **US1 (T095–T129)**: depends on G2. T127–T129 (public release) also require G0 + G1 evidence
+  on the target host.
+- **US2 (T130–T151)**: depends on US1 (sealed evidence, stored audits). T130 comes first.
+- **US4 (T152–T162)**: depends on US1. Independent of US2.
+- **US5 (T163–T168)**: depends on US1. It includes AI annotations (US2) and comparison (US4)
+  when present.
+- **US3 (T169–T176)**: depends on US1, US2 (`AiPanel`), US4 (`ComparisonView`), and US5
+  (export). It is P5, so the priority order already places it after them.
+- **Polish (T177–T183)**: depends on all stories. T181 (usability) needs the finished demo
+  (US3) and US2 explanations.
+
+### Within Each Story
+
+Tests → confirm failing → shared/pure modules → server modules → routes → UI → docs. Each
+story ends at a checkpoint.
+
+## Parallel Opportunities
+
+- **Setup**: T002–T004, T006–T013, T015–T017, T022–T024, and T028 are [P].
+- **M2**: test files T041–T045, T046, and T053–T054 in parallel; then G1 tests T058–T063 in
+  parallel.
+- **M3**: fixtures T067–T071, T077, T079, and T084, plus tests T072–T083, T078, T080, and T081,
+  all in parallel.
+- **US1**: tests T095–T109 in parallel; T110/T111, T113–T115, and T117–T122 in parallel.
+
+### Parallel Example: User Story 1
+
+```bash
+# Launch all US1 tests together (they must fail first):
+Task: "T095 canonical JSON tests in packages/shared/tests/unit/canonical-json.test.ts"
+Task: "T096 evidence reduction tests in packages/shared/tests/unit/evidence-reduce.test.ts"
+Task: "T100 /api/audits contract tests in apps/web/tests/integration/api-audits.test.ts"
+Task: "T104 dashboard tests in apps/web/tests/unit/dashboard.test.tsx"
+Task: "T108 e2e in e2e/us1-audit.spec.ts"
+
+# Then independent implementation files together:
+Task: "T110 packages/shared/src/canonical-json.ts"
+Task: "T111 packages/shared/src/evidence-reduce.ts"
+Task: "T113 apps/web/src/server/logger.ts"
+Task: "T120 apps/web/src/components/dashboard/*"
+```
+
+## Implementation Strategy
+
+### MVP first (User Story 1)
+
+1. Setup (M0), then Foundational: shared model, M1/G0, M2/G1, M3/G2.
+2. US1 → **stop and validate** with the T108/T109 e2e tests in test mode.
+3. Public MVP only after T127–T129: provider, reverse proxy, firewall, and G0 + G1 evidence on
+   that host, then `SCAN_ENABLED=true`.
+
+### Incremental delivery
+
+US1 (P1) → US2 (P2, with the G3 record) → US4 (P3) → US5 (P4) → US3 (P5; the demo showcases
+finished features).
+Polish follows. Each increment is demoable on its own, and none weakens a gate.
+
+## Notes
+
+- Every open decision has a task placed before the milestone it blocks: OD-9 (T005), OD-11
+  (T021), OD-8 (T025, T047), OD-10 (T065), OD-2 (T127), OD-7 (T128), and OD-6 (T130).
+- A gate task records evidence. Writing code or tests never counts as passing a gate.
+- Commit after each task or logical group, and create a PHR for each implementation session.

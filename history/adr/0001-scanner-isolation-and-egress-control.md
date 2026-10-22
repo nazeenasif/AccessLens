@@ -1,0 +1,210 @@
+# ADR-0001: Scanner Isolation and Egress Control
+
+> **Scope**: This ADR covers one decision cluster: how the browser that renders untrusted pages
+> is isolated, and how its network traffic is constrained (process/container topology, network
+> segmentation, application-layer egress filtering, host firewall policy, browser sandboxing).
+> These parts protect the same boundary and would change together.
+
+- **Status:** Accepted (2026-10-22, by the project owner, after review revision 1). Resolves
+  plan Open Decisions **OD-1** and **OD-5** and narrows **OD-2**. Acceptance approves the
+  design only: **no security gate (G0/G1) has passed**; gates pass only with recorded execution
+  evidence from the actual Docker stack and host firewall.
+- **Date:** 2026-10-22
+- **Feature:** 001-accesslens-mvp
+- **Context:** AccessLens loads arbitrary user-supplied public URLs in a real browser. The
+  following facts and constraints shaped the decision.
+  - **Constitution III** requires all of the following:
+    - SSRF and private-network protection validated against the IP actually connected to;
+    - re-validation of every redirect and subrequest;
+    - resource limits;
+    - a sandboxed, least-privilege browser in a process or container separate from the web/API
+      server.
+  - **Research R3** requires two network-level controls in production, so that a Chromium flag
+    bypass or proxy bug cannot be exploited:
+    - **NL-1**: the browser has no route except the egress proxy;
+    - **NL-2**: the proxy's own egress to non-public ranges is denied at the network level.
+  - **Playwright's Docker guidance** (checked 2026-10-22):
+    - the official image runs browsers as `root` by default, which disables Chromium's sandbox;
+    - for untrusted sites it recommends a separate non-root user combined with its
+      `seccomp_profile.json`, and says that profile "is needed to run Chromium with sandbox";
+    - it states that using the image to visit untrusted websites "is not recommended" without
+      those measures;
+    - it recommends `--ipc=host` (to avoid Chromium memory crashes) and `--init`.
+  - **Docker's documentation** (checked 2026-10-22):
+    - `DOCKER-USER` rules are "processed before" Docker's own forwarding rules;
+    - Compose `internal: true` creates "an externally isolated network";
+    - subnets (`ipam`) and `enable_ipv6` can be set per network;
+    - the docs say nothing about `DOCKER-USER` persistence across daemon restarts, or about
+      IPv6-specific `DOCKER-USER` usage.
+  - **Fixed constraints**: one Docker Compose host (stakeholder choice); a stateless server
+    (no database or queue); `cap_drop: [ALL]` for the scanner; MVP simplicity (Principle VIII).
+
+<!-- Significance checklist (ALL must be true to justify this ADR)
+     1) Impact: Long-term consequence for architecture/platform/security? YES — defines the SSRF boundary and constrains hosting.
+     2) Alternatives: Multiple viable options considered with tradeoffs? YES — see below.
+     3) Scope: Cross-cutting concern (not an isolated detail)? YES — compose topology, scanner, proxy, host ops, release gating. -->
+
+## Decision
+
+Accepted cluster:
+
+1. **Topology — three containers on segmented networks** (Docker Compose):
+
+   | Container | Networks | Published ports | Secrets | Role |
+   |---|---|---|---|---|
+   | `web` | `public` (normal), `scan-ctl` (`internal: true`) | 3000 (behind TLS reverse proxy) | `OPENROUTER_API_KEY`, `EVIDENCE_SIGNING_SECRET*`, `SCANNER_INTERNAL_TOKEN` | UI, public API, evidence sealing, AI calls |
+   | `scanner` | `scan-ctl` (`internal`), `scan-egress` (`internal`, fixed subnet) | none | `SCANNER_INTERNAL_TOKEN`, `PROXY_CONTROL_TOKEN` | `/scan` control API, Playwright Chromium, axe-core |
+   | `egress-proxy` | `scan-egress` (`internal`, **fixed IP**), `outbound` (normal, fixed IPv4 subnet, `enable_ipv6: false`) | none | `PROXY_CONTROL_TOKEN` only | Filtering forward proxy; the **only** scan-path component with an external route |
+
+   No AI key or evidence-signing secret is present in `scanner` or `egress-proxy`.
+   `PROXY_CONTROL_TOKEN` (≥ 32 random bytes) only authenticates scanner → proxy control calls.
+
+   - **NL-1** is enforced by Docker. `scanner` is attached only to internal networks, so
+     Chromium has no route to the internet, the host, or metadata endpoints. Its only way out is
+     `egress-proxy`.
+   - `web` binds its HTTP listener **only** to its `public`-network address, so nothing on
+     `scan-ctl` listens except the scanner's control API. A browser in `scanner` therefore can't
+     open connections to `web`. *(To be proven by the G1 test "browser → web on scan-ctl is
+     refused".)*
+
+2. **Application-layer egress filtering** — the R3 proxy logic moves from the scanner process
+   into `egress-proxy`. The proxy:
+   - resolves DNS itself, IPv4 only, matching `enable_ipv6: false`;
+   - rejects the request if any resolved address is non-public;
+   - connects to the validated IP without re-resolving;
+   - allows only ports 80/443.
+
+   **Per-audit accounting and proxy authentication**:
+   - Before each audit, the scanner registers a fresh random credential pair with the proxy's
+     control endpoint, authenticated with `PROXY_CONTROL_TOKEN`.
+   - The audit's browser context uses those credentials through Playwright's per-context
+     `proxy` username/password option, which Playwright documents for authenticated HTTP
+     proxies.
+   - The proxy **refuses every request without currently registered credentials (407)** and
+     attributes requests and bytes per audit.
+   - The scanner revokes the credentials when the context closes, and the proxy also drops them
+     after the total audit timeout.
+   - The scanner reads cap breaches and blocked hosts from the same endpoint.
+
+   **The browser can reach the control endpoint**, because it shares the scanner container's
+   network namespace, so network placement can't protect it. Its protection is the token
+   (constant-time compare), rate-limiting, and read-only per-audit views; it never exposes
+   other audits' credentials.
+
+   The Chromium flags from R3 (`<-loopback>` bypass removal, QUIC/WebRTC UDP off) are **kept as
+   defense in depth**. The host-resolver lock becomes `MAP * ~NOTFOUND`, with the proxy
+   addressed by its **fixed IP**, so Chromium needs no DNS at all.
+
+   **DNS leakage**: Docker's embedded DNS may still answer external names for containers on
+   internal networks. The documentation reviewed doesn't settle this. G1 must test whether
+   external DNS resolution works from `scanner`. If it does, the M2 implementation must disable
+   it for `scanner` (mechanism to be chosen at M2, documented in an addendum to this ADR) before
+   G1 can pass.
+
+3. **Network-layer egress denial (NL-2)** — host firewall rules in the `DOCKER-USER` chain,
+   applied to traffic from the `outbound` subnet:
+   - **order**: ESTABLISHED/RELATED accept first, then DROP for `0.0.0.0/8`, `10.0.0.0/8`,
+     `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.0.0.0/24`,
+     `192.0.2.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`,
+     `224.0.0.0/4`, `240.0.0.0/4` (which includes `255.255.255.255`), and every Docker bridge
+     subnet on the host. This list matches the proxy's application-level non-public
+     classification; a unit test keeps the two in sync;
+   - a matching `INPUT` rule drops connections from the `outbound` subnet to the host's own
+     addresses (`DOCKER-USER` covers forwarded traffic only);
+   - IPv6 egress is removed by `enable_ipv6: false`, not by firewall rules.
+
+   Because the docs don't say whether the rules persist, deployment MUST install them
+   persistently and run the NL-2 smoke test after every daemon or host restart.
+
+4. **Browser sandboxing (resolves OD-5)**:
+   - Chromium runs as the non-root `pwuser` with Playwright's `seccomp_profile.json`, keeping
+     Chromium's sandbox **enabled**.
+   - `--no-sandbox` MUST NOT be used in any deployment with `SCAN_ENABLED=true`. If the sandbox
+     can't start on a host, live scanning stays disabled there until a superseding ADR.
+   - `--ipc=host` is **not** used, because it shares the host IPC namespace. Instead, raise
+     `shm_size`; the value is set and measured at M2.
+   - Use `init: true`.
+   - Retain R4 hardening: `cap_drop: [ALL]`, `no-new-privileges`, read-only rootfs with `tmpfs`
+     `/tmp`, memory/CPU/PID limits, and a fresh context per audit.
+
+5. **Hosting consequence (narrows OD-2)**:
+   - Live scanning may only run on a host where the operator controls the Docker Engine and the
+     host firewall, such as a VM or VPS with root access.
+   - Managed container platforms without host-firewall control may host AccessLens only with
+     `SCAN_ENABLED=false` (demo and saved-history features only).
+
+6. **Release gate G1 (tests that must pass on the composed stack before `SCAN_ENABLED=true`)**:
+   - From `scanner`: a direct TCP connection to a public IP fails (no route); `web` on `scan-ctl`
+     is refused; `169.254.169.254` and RFC 1918 targets are unreachable.
+   - Through the proxy, every R3 SSRF vector is refused.
+   - From `egress-proxy`, a raw TCP probe (bypassing proxy logic) to `169.254.169.254`, RFC 1918,
+     and a Docker subnet is dropped by the host firewall (NL-2 independent of app code).
+   - The `scanner` and `egress-proxy` environments contain no AI or signing secrets.
+   - The proxy returns 407 for requests without registered credentials, and for revoked
+     credentials after an audit ends.
+   - The control endpoint rejects requests without `PROXY_CONTROL_TOKEN`.
+   - External DNS resolution from `scanner` fails (see the DNS leakage note in §2).
+   - Chromium reports its sandbox as enabled.
+   - **No gate counts as passed without recorded execution evidence** (CI run or deploy smoke-test
+     log) from the actual composed stack and host firewall.
+
+## Consequences
+
+### Positive
+
+- **Defense in depth with independent layers.** Exploiting SSRF would need a proxy logic bug
+  **and** a host firewall gap, or a browser escape **and** a Docker network escape. A Chromium
+  flag regression alone becomes harmless because NL-1 is enforced by Docker, not by flags.
+- The proxy runs in a container holding only `PROXY_CONTROL_TOKEN` (no AI or signing
+  secrets) and no access to the web/API process, which limits the blast radius of a proxy
+  compromise.
+- Running sandboxed as non-root follows Playwright's own guidance for untrusted sites. Avoiding
+  `--ipc=host` keeps the host IPC namespace closed.
+- Each control has an automated test, satisfying constitution III and VI, and G1 is checkable in
+  CI and at deploy.
+- The scanner, web, and proxy can be reasoned about and replaced independently. Swapping the
+  proxy implementation later doesn't touch the scanner.
+
+### Negative
+
+- **One more container** (`egress-proxy`) and a small control channel for per-audit accounting.
+  More moving parts than a single-process proxy (Complexity Tracking entry required).
+- **Host coupling**: NL-2 depends on host firewall rules, so live scanning can't run on most
+  managed container platforms. Operators must maintain persistent firewall rules, and Docker
+  doesn't document their persistence.
+- **IPv6 targets aren't supported** for scanning (IPv4-only egress); IPv6-only sites fail with
+  `TARGET_UNREACHABLE`.
+- The seccomp profile allows user-namespace cloning (needed for Chromium's sandbox), which
+  widens the kernel attack surface slightly compared with Docker's default profile.
+- Without `--ipc=host`, Chromium may hit shared-memory limits on heavy pages. `shm_size` must be
+  tuned, and crashes map to `SCANNER_FAILURE`.
+- **Constitution wording gap**: Principle III says redirects and subrequests are re-validated
+  "via request interception". This ADR enforces that at the network/proxy layer instead, which
+  meets the intent (it is stronger than in-browser interception), but a literal reading differs.
+  A PATCH amendment to the constitution is recommended; it isn't made here.
+- Binding `web` only to its `public` address depends on how Next.js standalone binds and on
+  stable container addressing. This must be proven at M2; if it can't be, the fallback is to
+  move scanner control onto a separate network or reverse the control connection (a superseding
+  ADR).
+
+## Alternatives Considered
+
+| Alternative cluster | NL-1 | NL-2 | Why rejected |
+|---|---|---|---|
+| **B-only**: proxy inside the scanner container (original R3 design) + host `DOCKER-USER` rules | No — the browser has a direct route; bypass prevention rests on Chromium flags | Yes | Fails the R3 requirement that flags are not the only barrier |
+| **A-only**: separate proxy container on internal networks, no host firewall | Yes | No — only the proxy's application-level checks stop private egress | Fails NL-2; one proxy bug equals SSRF |
+| **C**: single container with in-container iptables owner-match rules for the browser UID | Yes | Yes | Needs `NET_ADMIN`, which contradicts `cap_drop: [ALL]`, and a compromised container could rewrite its own rules |
+| **Off-the-shelf egress proxy** (e.g., Squid or a dedicated SSRF-filtering proxy) in the `egress-proxy` slot | Same as chosen | Same as chosen | Viable; deferred. Per-audit byte/request accounting and the TypeScript test harness favor the small custom proxy for the MVP. Can replace it later without changing this topology |
+| **MicroVM / gVisor per scan** | Yes | Yes (with host policy) | Strongest isolation but heavy operations and cost for a single-host MVP; candidate for a future ADR if scanning is opened widely |
+| **Playwright image defaults**: root, `--no-sandbox`, `--ipc=host` | — | — | Explicitly discouraged by Playwright for untrusted sites; disables the sandbox and shares host IPC |
+
+## References
+
+- Feature Spec: [specs/001-accesslens-mvp/spec.md](../../specs/001-accesslens-mvp/spec.md) (FR-001–FR-008, Constitution-Mandated Requirements)
+- Implementation Plan: [specs/001-accesslens-mvp/plan.md](../../specs/001-accesslens-mvp/plan.md) (Delivery Order M2/G1, Open Decisions OD-1/OD-2/OD-5, Complexity Tracking)
+- Research: [specs/001-accesslens-mvp/research.md](../../specs/001-accesslens-mvp/research.md) (R3, R4, R12, R13)
+- Contracts: [specs/001-accesslens-mvp/contracts/scanner-api.openapi.yaml](../../specs/001-accesslens-mvp/contracts/scanner-api.openapi.yaml)
+- Constitution: [.specify/memory/constitution.md](../../.specify/memory/constitution.md) Principles III, IV, VI, VIII
+- External: Playwright Docker docs (https://playwright.dev/docs/docker); Docker packet filtering and `DOCKER-USER` (https://docs.docker.com/engine/network/firewall-iptables/); Compose networks (https://docs.docker.com/reference/compose-file/networks/) — all checked 2026-10-22
+- Related ADRs: [ADR-0002](./0002-stateless-server-signed-evidence.md) (keeps the signing key in `web` only); [ADR-0003](./0003-stack-and-deployment.md) (adopts the hosting constraint in Decision §5)
+- Evaluator Evidence: [history/prompts/001-accesslens-mvp/6-adr-scanner-isolation-egress.misc.prompt.md](../prompts/001-accesslens-mvp/6-adr-scanner-isolation-egress.misc.prompt.md)

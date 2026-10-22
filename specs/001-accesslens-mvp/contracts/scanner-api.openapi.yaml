@@ -1,0 +1,58 @@
+openapi: 3.1.0
+info:
+  title: AccessLens Scanner Service (internal)
+  version: 1.2.0
+  description: |
+    Internal only. Never published to the host or internet (no `ports:` mapping); reachable only
+    from `web` on the `scan-ctl` Docker network (`internal: true`). Every request must carry
+    `X-Scanner-Token: ${SCANNER_INTERNAL_TOKEN}` (constant-time compare).
+
+    Secrets: the scanner receives SCANNER_INTERNAL_TOKEN and PROXY_CONTROL_TOKEN only — never
+    OPENROUTER_* or EVIDENCE_SIGNING_* (asserted by test). The web service signs evidence after
+    receiving results (research R6).
+
+    Network (ADR-0001, Accepted): the scanner sits only on internal networks; browser traffic
+    leaves solely via the separate `egress-proxy` container using per-audit proxy credentials.
+    The scanner ↔ egress-proxy control channel (credential registration, per-audit counters) is
+    an internal implementation interface, not part of this contract.
+servers:
+  - url: http://scanner:4001
+paths:
+  /scan:
+    post:
+      operationId: scan
+      parameters:
+        - in: header
+          name: X-Scanner-Token
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [auditId, url]
+              properties:
+                auditId: { type: string, format: uuid }
+                url: { type: string, maxLength: 2048, description: "Already normalized by web; scanner re-validates (defense in depth)." }
+      responses:
+        "200":
+          description: |
+            NDJSON stream of AuditEvent (public-api.openapi.yaml#/components/schemas/AuditEvent)
+            with one difference: violation Findings carry NO `evidence`/`evidenceSignature`
+            (the web service adds them). Outcome semantics are identical: terminal `result`
+            (status complete|partial, partialReasons per research R5) or `error` (no valid
+            results, no Audit). Stage `queued` includes queuePosition.
+          content:
+            application/x-ndjson:
+              schema: { type: object }
+        "401": { description: Missing/invalid token. }
+        "503": { description: "SCANNER_BUSY: concurrency and queue full." }
+  /healthz:
+    get:
+      operationId: healthz
+      responses:
+        "200": { description: "Browser launched and egress proxy reachable." }
+        "503": { description: "Browser or proxy unavailable." }

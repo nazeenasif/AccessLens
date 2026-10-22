@@ -3,7 +3,7 @@
 **Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
 **Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
 
-**Note**: This template is filled in by the `/sp.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+**Note**: This template is filled in by the `/sp.plan` command. See `.claude/commands/sp.plan.md` for the execution workflow.
 
 ## Summary
 
@@ -31,7 +31,25 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Gates from `.specify/memory/constitution.md` (v1.0.0). Mark each PASS / FAIL / N/A with a
+one-line justification; any FAIL requires a Complexity Tracking entry.
+
+- [ ] **I. Evidence-First**: Findings come only from Playwright + axe-core; LLM output is
+      attached to existing finding IDs and cannot alter rule, severity, or selector.
+- [ ] **II. Honest Claims**: No compliance claims; outputs separate detected violations,
+      manual-review items, AI explanations, proposed fixes, and verified outcomes.
+- [ ] **III. Untrusted Targets**: Trust boundaries crossed are listed; SSRF/private-IP,
+      redirect, subrequest, content-handling, resource-limit, and isolation controls defined.
+- [ ] **IV. Secrets**: Provider keys server-side only; `.env.example` updated; redaction in logs.
+- [ ] **V. Provider Independence**: AI access only via the typed provider interface; report
+      still produced when AI is unavailable.
+- [ ] **VI. Tests**: Unit, integration, security, and e2e tests planned; known-violation
+      fixtures and re-scan verification included where feasible; no live LLM/site calls in CI.
+- [ ] **VII. Increments**: Plan covers one independently testable user story.
+- [ ] **VIII. Simplicity**: No new infrastructure/abstractions without justification.
+- [ ] **IX. Privacy & Cost**: Stored content minimized; timeouts, size caps, rate limits, and
+      token caps stated with concrete values; retention policy stated if data is persisted.
+- [ ] **X. Documentation**: ADR candidates identified; setup/env/test-command docs updates listed.
 
 ## Project Structure
 
