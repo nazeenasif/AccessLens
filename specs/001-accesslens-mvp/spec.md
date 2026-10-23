@@ -483,8 +483,9 @@ identifiers beyond the audit reference.
 - **Identity for limits**: with no accounts, rate limits apply per client network address.
 - **Default limits**: set in plan research R12 (30 s page-load limit, 20 s analysis limit, 60 s
   total audit limit, 50,000 page elements, 10 redirects max, 5 audits per client per 10 minutes,
-  2 concurrent audits system-wide). A page over the element limit is not analysed and gets a
-  "page too large" error rather than a partial audit, because no findings exist for it.
+  2 concurrent audits system-wide). The element limit is inclusive: a page with up to 50,000
+  elements is analysed, and a page with 50,001 or more is not. It gets a "page too large" error
+  rather than a partial audit, because no findings exist for it.
 - **Partial result**: defined by FR-007a; the reason list and the interruption-to-outcome
   mapping are in plan research R5. Findings without AI content (not yet requested, or generation
   failed) do not make an audit partial.

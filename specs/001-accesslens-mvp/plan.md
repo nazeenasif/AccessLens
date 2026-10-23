@@ -169,7 +169,7 @@ fixtures/
 ├── axe/rule-inventory.4.14.0.json  # effective rule snapshot (R2, test F-INV)
 ├── pages/wcag/                 # F-20A … F-CLEAN pages + *.expected.json (R2)
 ├── pages/interruptions/        # slow-load, request-heavy, large, frames, blocked-subresource pages (R5)
-├── pages/dom-limit/            # 49 999 / 50 001 elements, two-frame, shadow-root pages (R15)
+├── pages/dom-limit/            # 49 999 / 50 000 / 50 001 elements, two-frame, shadow-root pages (R15)
 ├── pages/benchmark/            # ~1k/10k/25k/50k, contrast-heavy, multi-frame (R5 benchmark)
 ├── benchmark/                  # recorded results-<axe-version>.json
 ├── pages-v2/                   # second version for comparison tests (SC-010)
@@ -253,6 +253,7 @@ blocks.
 | OD-8 | CI platform and where G1 runs | **Open** | M2 exit (G1) | ADR-0003. The repo has no remote yet. |
 | OD-9 | TypeScript 7.0 vs 5.9 | **Open** — decided by test | M0 | ADR-0003 M0 compatibility test. |
 | OD-10 | Docker embedded-DNS leakage from `scanner` | **Open** — conditional | M2 exit (G1) | If the G1 DNS check shows external resolution, choose a mitigation and add an ADR-0001 addendum. |
+| OD-12 | NL-2 firewall rule order and scoping | **Resolved** 2026-10-23 by ADR-0001 Amendment 1 (Accepted; task T185) | — | Drop-first, state-independent drops scoped to `-s <outbound>`; no broad ESTABLISHED/RELATED accept; `INPUT` drop at position 1; tagged, idempotent rules; scoped conntrack flush; helpers off; fail closed on a non-iptables backend. Implemented by T057, validated live by T184, gated by T066 (G1 **not passed**). |
 | OD-11 | `web` binding fallback | **Open** — conditional | M0 | If the ADR-0003 binding test fails, ADR-0001's fallback (separate control network or reversed control connection) needs a superseding ADR. |
 
 ## Risks

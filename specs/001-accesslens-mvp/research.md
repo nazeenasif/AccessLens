@@ -146,6 +146,16 @@ proxy logic are not accepted as the only barrier.
   in ADR-0001 §3 and to the Docker bridge subnets. IPv6 egress is removed by
   `enable_ipv6: false`. The rules must be installed persistently and re-verified after every
   daemon or host restart, because Docker doesn't document their persistence.
+  **Rule order and scoping per ADR-0001 Amendment 1 (Accepted 2026-10-23, OD-12)**:
+  - drops are inserted first and match regardless of connection state;
+  - there is no broad ESTABLISHED/RELATED accept;
+  - every rule is scoped to `-s <outbound subnet>` and tagged `accesslens-nl2`;
+  - the `INPUT` drop sits at position 1;
+  - the conntrack flush covers only the `outbound` subnet;
+  - conntrack helpers are off;
+  - the install script fails closed on a non-iptables Docker firewall backend.
+
+  The packet-path table is in ADR-0001.
 - **Consequence for hosting**: NL-2 needs control of the host firewall. Live scanning may only
   run on a Linux VM/VPS where the operator controls Docker Engine and iptables. Managed
   platforms, and local Docker Desktop installs that can't apply and verify these rules, may run
@@ -580,6 +590,9 @@ trusts any client-supplied field it didn't sign.
     stays bounded even on very large pages. The running total carries across frames, and the
     whole measurement has a 2 s timeout inside the analysis budget.
 - **Enforcement and over-limit behavior**:
+  - **The limit is inclusive.** A page with **≤ `SCAN_MAX_DOM_ELEMENTS`** elements is analysed,
+    so with the default 49 999 and 50 000 are allowed. **> limit** exceeds it (50 001 is
+    rejected). Early stop at limit + 1 is exactly the first count that exceeds.
   - If the count exceeds the limit, or the measurement doesn't finish in 2 s, axe is **not run**
     and the audit ends with `error DOM_TOO_LARGE` ("This page has more than 50,000 elements, which
     is too large to audit automatically"). Nothing is saved.
@@ -595,7 +608,8 @@ trusts any client-supplied field it didn't sign.
     context can't express "the first N elements" deterministically, and a partial audit on an
     arbitrary subset would overstate coverage.
   - Count only the main frame (undercounts pages built from frames).
-- **Tests (G2)**: fixtures at 49 999 and 50 001 elements (main frame), a 30k + 30k two-frame page
+- **Tests (G2)**: fixtures at 49 999, **50 000**, and 50 001 elements (main frame; the first two
+  are analysed, the last gives `DOM_TOO_LARGE`), a 30k + 30k two-frame page
   (over the limit in total), and a large open-shadow-root page. The tests assert `DOM_TOO_LARGE`
   is emitted, axe is not called, and nothing is saved. A unit test checks the early stop at
   limit + 1.

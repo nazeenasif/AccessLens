@@ -111,10 +111,18 @@ on that host with its evidence log kept.
 - **NL-1**: provided by the Compose topology. `scanner` is attached only to `internal: true`
   networks, `web` binds only to its `public`-network address, and the proxy is addressed by a
   fixed IP.
-- **NL-2**: host `DOCKER-USER` rules (ESTABLISHED/RELATED accept first) dropping traffic from
+- **NL-2** (ADR-0001 §3 with Amendment 1): tagged host `DOCKER-USER` rules, inserted **first** and
+  matching regardless of connection state (no broad ESTABLISHED/RELATED accept), dropping traffic from
   the `outbound` subnet to every non-public IPv4 range listed in ADR-0001 §3 and to all Docker
   bridge subnets. Plus an `INPUT` rule dropping traffic from the `outbound` subnet to the host's
-  own addresses. IPv6 is off on `outbound` (`enable_ipv6: false`).
+  own addresses (inserted at position 1). IPv6 is off on `outbound` (`enable_ipv6: false`).
+  - **Scope**: every rule matches only `-s <outbound subnet>` and carries the
+    `accesslens-nl2` tag.
+  - **Install and uninstall**: they touch only tagged rules. They never flush chains or change
+    policies.
+  - **Conntrack flush**: limited to the `outbound` subnet, so SSH sessions and other
+    containers' connections are unaffected.
+  - **Fail closed**: the install script stops if Docker isn't using the iptables backend.
 - **Persistence**: Docker doesn't document whether `DOCKER-USER` rules survive restarts, so
   install them through a persistent mechanism and re-run `npm run test:g1` after every Docker
   daemon or host restart. The exact install script is written at M2.

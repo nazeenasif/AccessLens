@@ -6,7 +6,16 @@ description: "Task list for AccessLens MVP (001-accesslens-mvp)"
 # Tasks: AccessLens MVP — Single-Page Accessibility Audit & AI Remediation
 
 **Input**: Design documents from `/specs/001-accesslens-mvp/` (plan.md, spec.md, research.md R1–R15,
-data-model.md, contracts/, quickstart.md) and ADR-0001/0002/0003 (all Accepted).
+data-model.md, contracts/, quickstart.md) and the ADRs.
+**ADR status, verified from the files on 2026-10-23**:
+- ADR-0001: Accepted; Amendment 1 (firewall rule order and scoping) **Accepted 2026-10-23**
+  (OD-12 resolved by T185).
+- ADR-0002: Accepted, plus Amendment 1 (per-audit cap); **OD-6 OPEN**.
+- ADR-0003: Accepted; **OD-2, OD-7, OD-8, OD-9 OPEN**. The owner chose GitHub Actions and
+  gitleaks for OD-8a on 2026-10-22, but that choice isn't recorded in the ADR yet, so it stays
+  OPEN until T025 records it.
+
+The tasks blocked by each open decision are listed in **Notes**.
 **Prerequisites**: plan.md, spec.md (both present).
 
 **Tests**: REQUIRED (constitution Principle VI). Each story's test tasks come first and must be
@@ -132,6 +141,17 @@ CI.
   hit) and its test `tests/config/check-secrets.test.ts`.
 - [ ] T024 [P] Write the image-user test `tests/config/images-nonroot.test.ts`: builds each
   image and asserts its runtime UID ≠ 0 and base image tags are pinned (no `latest`).
+- [ ] T186 [P] Write the scanning-default guard test `tests/config/scan-enabled-default.test.ts`:
+  - `.env.example` sets `SCAN_ENABLED=false`;
+  - no service or profile in `docker-compose.yml` sets `SCAN_ENABLED` to anything but `false`,
+    and none sets it from an un-defaulted variable that could resolve to `true`;
+  - `scripts/` and the CI config (once T026 exists) never set `SCAN_ENABLED=true`;
+  - the `SCAN_ENABLED` check added in US1 (T116, also asserted by the T101 health test) treats
+    an unset or empty value, or anything other than the exact string `true`, as **disabled**.
+    This assertion is added when T116 lands; until then it is skipped with a reason naming
+    T116.
+
+  Runs in the `config` project.
 - [ ] T025 **Decision OD-8a (CI platform)**: choose the CI platform (the repository needs a
   remote) and record it as an addendum in `history/adr/0003-stack-and-deployment.md` and in the
   OD-8 row of `specs/001-accesslens-mvp/plan.md`. Where G1 runs is decided separately in T047.
@@ -153,7 +173,7 @@ CI.
   setup, env vars, test commands, `SCAN_ENABLED=false` notice, data retention) from
   `specs/001-accesslens-mvp/quickstart.md`.
 
-**Checkpoint M0**: CI green; T005, T014, T019, T023, T024, and T027 pass; `/api/health` isn't built
+**Checkpoint M0**: CI green; T005, T014, T019, T023, T024, T027, and T186 pass; `/api/health` isn't built
 yet.
 
 ---
@@ -281,14 +301,47 @@ disabled throughout.
   event.
 - [ ] T055 Implement `services/scanner/src/browser.ts` (T053).
 - [ ] T056 Implement `services/scanner/src/proxy-client.ts` (T054).
-- [ ] T057 [P] Write the NL-2 firewall scripts:
+- [X] T185 **Decision OD-12 (NL-2 firewall rule order)**: **resolved 2026-10-23**. The owner
+  accepted ADR-0001 Amendment 1, which covers:
+  - drop-first, state-independent drops scoped to `-s <outbound subnet>`;
+  - no broad ESTABLISHED/RELATED accept;
+  - the `INPUT` drop at position 1;
+  - tagged, idempotent rules;
+  - rules installed before `egress-proxy` starts, plus a conntrack flush scoped to `outbound`;
+  - conntrack helpers off;
+  - fail closed on a non-iptables backend.
+
+  The decision is recorded in `history/adr/0001-scanner-isolation-and-egress-control.md` (the
+  original §3 text is preserved; Amendment 1 supersedes its "order" bullet) and in the OD-12
+  row of `specs/001-accesslens-mvp/plan.md`. This unblocks T057 and T184. **It doesn't pass
+  G1**: T066 still requires recorded evidence.
+- [ ] T057 [P] Write the NL-2 firewall scripts per ADR-0001 §3 **as amended by Amendment 1**:
   - `ops/firewall/nonpublic-ipv4.txt` (generated from T038);
-  - `ops/firewall/install-nl2.sh`: `DOCKER-USER` ESTABLISHED/RELATED accept first; DROP from the
-    `outbound` subnet to each listed range and all Docker bridge subnets; an `INPUT` DROP from
-    `outbound` to the host's own addresses;
+  - `ops/firewall/install-nl2.sh`:
+    - **Pre-checks, failing closed with a non-zero exit and no partial rule set**: Docker's
+      firewall backend is iptables (`DOCKER-USER` exists); the `outbound` subnet equals the
+      fixed value in `docker-compose.yml`; `net.netfilter.nf_conntrack_helper=0`; `conntrack`
+      is installed.
+    - **DOCKER-USER**: insert at the **top**
+      `-s <outbound subnet> -d <prohibited range or Docker bridge subnet> -m comment --comment
+      accesslens-nl2 -j DROP` for every listed range and every Docker bridge subnet on the
+      host, with **no** conntrack-state match.
+    - **INPUT**: insert at **position 1**
+      `-s <outbound subnet> -d <each host address> -m comment --comment accesslens-nl2 -j DROP`.
+      This covers the bridge gateways, LAN and public IPs, and `docker-proxy` listeners.
+    - **No** ESTABLISHED/RELATED ACCEPT is added anywhere.
+    - **Scope guarantees**: every rule matches `-s <outbound subnet>`; no chain flush (`-F`);
+      no policy change; Docker-owned chains (`DOCKER`, `DOCKER-FORWARD`, `DOCKER-ISOLATION-*`)
+      are never modified.
+    - **Idempotent replace**: delete existing `accesslens-nl2`-tagged rules, then insert, so a
+      re-run produces an identical rule set.
+    - **After install**: run `conntrack -D -s <outbound subnet>` only; never a global flush.
+  - `ops/firewall/uninstall-nl2.sh`: removes **only** `accesslens-nl2`-tagged rules.
   - `ops/firewall/verify-nl2.sh`;
-  - `ops/firewall/accesslens-nl2.service` (systemd unit that re-applies the rules at boot after
-    Docker starts).
+  - `ops/firewall/accesslens-nl2.service`: a systemd unit with `After=docker.service` that is
+    ordered **before** the unit that starts the Compose stack, so the rules exist before
+    `egress-proxy` opens any connection; it re-applies the rules and the conntrack flush at
+    every boot.
 - [ ] T058 [P] Write G1 test `tests/g1/nl1-no-direct-route.test.ts`: from inside `scanner`, a
   direct TCP connection to a public IP fails, and connections to `169.254.169.254` and RFC 1918
   targets fail.
@@ -297,6 +350,41 @@ disabled throughout.
 - [ ] T060 [P] Write G1 test `tests/g1/nl2-raw-probes.test.ts`: from inside `egress-proxy`, raw
   TCP probes (bypassing proxy logic) to `169.254.169.254`, each RFC 1918 block, a Docker bridge
   subnet, and the host's own address are dropped by the host firewall.
+- [ ] T184 [P] Write G1 test `tests/g1/nl2-rule-order.test.ts` against the **running** Docker
+  stack on the G1 host, validating ADR-0001 Amendment 1 (unblocked by T185). It asserts:
+  - **Rule order**: in `iptables -S DOCKER-USER`, every tagged `-s <outbound> -d <prohibited>
+    -j DROP` rule comes before any `ACCEPT`, has no `--ctstate` match, and there is no broad
+    `ESTABLISHED,RELATED` accept. The tagged `INPUT` drop for the host's own addresses is at
+    position 1.
+  - **Scope**: every `accesslens-nl2` rule contains `-s <outbound subnet>`. No untagged rule was
+    added or removed, and chain policies and Docker-owned chains are byte-identical
+    (`iptables-save`) before and after install, apart from the tagged rules.
+  - **Packet path**: using **counter deltas** (read before and after; never zero chain counters
+    of unrelated rules), a probe from inside `egress-proxy` to each prohibited range, to
+    another container's IP, to the host-published `web:3000` via the host IP (the DNAT hairpin
+    case), and to the host's own addresses increments exactly the expected tagged
+    `DOCKER-USER` or `INPUT` DROP counter. This proves the packets traverse the intended chain.
+  - **Pre-existing flow**: with the NL-2 rules temporarily removed, open a long-lived TCP
+    connection from `egress-proxy` to a private test listener on the G1 host. Then run
+    `install-nl2.sh` and assert the connection is cut and can't be re-established. Rules are
+    restored even if the test fails.
+  - **Helpers**: `nf_conntrack_helper` is 0 and no conntrack helper is attached to `outbound`
+    flows.
+  - **Legitimate traffic still works**: an HTTPS request from `egress-proxy` to a public test
+    endpoint completes, so return traffic isn't dropped. Name resolution inside `egress-proxy`
+    still works through Docker's embedded DNS.
+  - **No disruption to unrelated connections**: across install, re-install, and the scoped
+    conntrack flush:
+    - a pre-opened TCP session to the host from outside the `outbound` subnet (simulating the
+      operator's SSH) stays connected;
+    - a long-lived outbound connection from `web` on the `public` network stays connected;
+    - `conntrack -L` entries whose source isn't the `outbound` subnet are still present.
+  - **Idempotence and clean removal**: running `install-nl2.sh` twice yields an identical
+    tagged rule set; `uninstall-nl2.sh` removes all and only `accesslens-nl2` rules.
+  - **Fail closed**: on a test host or VM configured with Docker's non-iptables backend, or with
+    a mismatched `outbound` subnet, `install-nl2.sh` exits non-zero and leaves no tagged rules.
+  - **Evidence**: results are written into the T064 evidence log. This test passing is a
+    precondition for T066 but doesn't record G1 by itself.
 - [ ] T061 [P] Write G1 test `tests/g1/proxy-vectors.test.ts`. Through the production-config
   proxy it covers:
   - loopback (`127.0.0.1`, `[::1]`, `localhost`), RFC 1918, metadata, and the container
@@ -319,7 +407,8 @@ disabled throughout.
   choose a mitigation, implement it in `docker-compose.yml`, and add an addendum to
   `history/adr/0001-scanner-isolation-and-egress-control.md`. Otherwise mark OD-10 "not needed"
   in `specs/001-accesslens-mvp/plan.md`.
-- [ ] T066 **Run Gate G1** on the T047 host with `ops/firewall/install-nl2.sh` applied: run
+- [ ] T066 **Run Gate G1** on the T047 host with `ops/firewall/install-nl2.sh` applied. It
+  requires T185 (OD-12, resolved) and T184 included and passing in `tests/g1/`. Run
   `npm run test:g1` and record the evidence log in `specs/001-accesslens-mvp/gate-evidence.md`.
   Re-run after any daemon or host restart.
 
@@ -341,8 +430,12 @@ disabled throughout.
   - a cross-origin frame page;
   - a blocked-subresource page (subresource on a non-80/443 port);
   - a slow-axe page.
-- [ ] T070 [P] Create the DOM-limit fixtures in `fixtures/pages/dom-limit/`: `49999.html`,
-  `50001.html`, `two-frames-30k-30k.html`, and `shadow-root-large.html`.
+- [ ] T070 [P] Create the DOM-limit fixtures in `fixtures/pages/dom-limit/`:
+  - `49999.html`, **`50000.html`**, and `50001.html`. Each has an exact element count (counted
+    across all frames and open shadow roots, per research R15), asserted by a fixture
+    self-check script `fixtures/pages/dom-limit/verify-counts.mjs`;
+  - `two-frames-30k-30k.html`;
+  - `shadow-root-large.html`.
 - [ ] T071 [P] Create the test-only fixture server `tests/support/fixture-server.ts`, serving
   `fixtures/` and the redirect/slow endpoints for T063 and T069.
 - [ ] T072 [P] Write mapping unit tests in `services/scanner/tests/unit/map-axe.test.ts`:
@@ -357,8 +450,13 @@ disabled throughout.
   - `SCAN_MAX_DOM_ELEMENTS` must be within 1 000–200 000;
   - the defaults are 30/20/5/60 s and 50 000.
 - [ ] T074 [P] Write DOM-measure unit tests in `services/scanner/tests/unit/dom-measure.test.ts`:
-  early stop at limit + 1, open shadow roots counted, a running total across frames, and the 2 s
-  timeout → over-limit.
+  - **inclusive boundary** with the default limit: 49 999 → within, 50 000 → within, 50 001 →
+    exceeds;
+  - the same boundary holds for a custom `SCAN_MAX_DOM_ELEMENTS` (e.g. 1 000 / 1 001);
+  - counting stops at limit + 1;
+  - open shadow roots are counted;
+  - a running total across frames (30k + 30k exceeds);
+  - the 2 s measurement timeout → treated as exceeding.
 - [ ] T075 [P] Write WCAG coverage integration tests in
   `services/scanner/tests/integration/wcag-fixtures.test.ts`:
   - each F-20A … F-CLEAN page yields exactly its must-report rules and none of its must-not-report
@@ -366,13 +464,27 @@ disabled throughout.
   - F-INV: the effective rule set equals `fixtures/axe/rule-inventory.4.14.0.json`;
   - engine `tags` equal the R2 set.
 - [ ] T076 [P] Write outcome-mapping integration tests in
-  `services/scanner/tests/integration/outcomes.test.ts`, one per research R5 table row:
-  - `navigation_timeout` partial / `NAVIGATION_TIMEOUT` error;
-  - request/byte cap partial / `LIMIT_EXCEEDED`;
-  - `frames_not_inspected`; `subresources_blocked`;
-  - `DOM_TOO_LARGE` with axe **not** invoked; `AUDIT_TIMEOUT` on the slow-axe page;
-  - `SCANNER_FAILURE` on a crash;
-  - `partialReasons` non-empty iff partial.
+  `services/scanner/tests/integration/outcomes.test.ts`, one per research R5 table row. Each
+  eligible interruption gets **two distinct tests**: one where valid findings exist and one
+  where no valid results exist.
+  - **Partial (valid findings exist)**: each asserts a terminal `result` with
+    `status: "partial"`, exactly the expected `partialReasons`, and a non-empty `findings` list
+    from the evaluated document:
+    - slow-`load` page (document committed, `load` not reached) → `navigation_timeout`;
+    - request cap reached after the document committed → `request_limit_reached`;
+    - byte cap reached after the document committed → `byte_limit_reached`;
+    - `frames_not_inspected`; `subresources_blocked`.
+  - **Error (no valid results)**: each asserts a terminal `error` with the code and **no**
+    Audit object:
+    - no document committed within the navigation limit → `NAVIGATION_TIMEOUT`;
+    - cap reached before a document → `LIMIT_EXCEEDED`;
+    - analysis exceeds the 20 s budget on the slow-axe page → `AUDIT_TIMEOUT` (axe is
+      all-or-nothing, so it's never partial);
+    - `DOM_TOO_LARGE` on `50001.html` with axe **not** invoked;
+    - `SCANNER_FAILURE` on a crash.
+  - **Boundary**: `49999.html` and `50000.html` produce `complete` (or `partial` only for
+    another reason) audits with axe invoked.
+  - **Invariant**: `partialReasons` is non-empty iff `status = "partial"`.
 - [ ] T077 [P] Create the target-response fixtures in `fixtures/pages/target-responses/` and the
   fixture-server routes in `tests/support/fixture-server.ts`: a 404 page, a 500 page, a PDF
   (`application/pdf`), a `Content-Disposition: attachment` HTML response, a connection-refused
@@ -414,6 +526,21 @@ disabled throughout.
   - NDJSON event order `queued` → `loading` → `analyzing` → exactly one terminal event;
   - queue full → 503 `SCANNER_BUSY`;
   - findings carry no `evidence`.
+- [ ] T188 [P] Write scanner contract conformance tests in
+  `services/scanner/tests/integration/scanner-contract.test.ts`, using a JSON Schema 2020-12
+  validator against `specs/001-accesslens-mvp/contracts/scanner-api.openapi.yaml` and
+  `public-api.openapi.yaml`:
+  - `/scan` request bodies: valid ones are accepted, and unknown keys or a URL > 2048 chars are
+    rejected;
+  - every NDJSON line emitted by the **running** scanner, across all T076, T077, and DOM-limit
+    fixtures, validates against `AuditEvent`, minus the `evidence`/`evidenceSignature` fields
+    the scanner contract excludes, **and** against the shared Zod scanner-output schema
+    (T032), so both validators agree;
+  - 401/503 bodies and `/healthz` 200/503 match the contract.
+
+  If the scanner contract's 200 schema is too loose to validate (`type: object`), tighten it to
+  reference the shared `AuditEvent` without evidence in the same change, and record the
+  contract version bump.
 - [ ] T083 [P] Write budget tests in `services/scanner/tests/integration/budget.test.ts`:
   - `t0` starts at slot acquisition (queue wait excluded);
   - an analysis timeout emits `AUDIT_TIMEOUT` before teardown;
@@ -439,16 +566,20 @@ disabled throughout.
   - navigation with redirect counting;
   - target-response classification (`TARGET_UNREACHABLE`, `TARGET_HTTP_ERROR`, `NOT_HTML`)
     before analysis;
-  - DOM measure → `DOM_TOO_LARGE`;
+  - DOM measure → `DOM_TOO_LARGE` **only when the count exceeds** `SCAN_MAX_DOM_ELEMENTS`
+    (inclusive limit, research R15);
   - axe with the exact R2 tags under the 20 s budget;
   - read proxy counters;
-  - R5 outcome mapping;
+  - R5 outcome mapping: when an eligible interruption happens and axe completed on a committed
+    document, emit a `result` with `status: "partial"` and every applicable reason; when no
+    valid axe results exist (no document, cap before the document, analysis timeout, DOM over
+    the limit, crash), emit an `error` with no Audit;
   - lifecycle events through T088;
   - revoke credentials and tear down within 5 s.
 
   Makes T075, T076, T083, T063, T078, T080, and T081 pass.
 - [ ] T091 Implement `services/scanner/src/server.ts` (`/scan` NDJSON, `/healthz`, token auth,
-  slot pool and queue), making T082 pass.
+  slot pool and queue), making T082 and T188 pass.
 - [ ] T092 Implement the benchmark `services/scanner/bench/axe-bench.ts` and the `bench:axe`
   script: 20 runs per T084 fixture in the hardened container; writes p50/p95 to
   `fixtures/benchmark/results-4.14.0.json`; fails if p95 at 50k > 15 s.
@@ -611,11 +742,23 @@ and each violation carries sealed evidence.
 - [ ] T128 [US1] **Decision OD-7 (TLS reverse proxy)**: choose one, record it in the ADR-0003
   addendum, and add its config under `ops/reverse-proxy/`. It must forward one hop
   (`TRUSTED_PROXY_HOPS=1`) and must not log request bodies.
+- [ ] T187 [US1] Write the scan-enable guard `scripts/check-scan-enable.mjs <host>` and its test
+  `tests/config/check-scan-enable.test.ts`. The script exits non-zero unless
+  `specs/001-accesslens-mvp/gate-evidence.md` has a **G0** row and a **G1** row for that exact
+  host, each with:
+  - result `pass`;
+  - a commit SHA that is an ancestor of the deployed commit;
+  - an evidence link or log path that exists.
+
+  Test cases: missing G1, a G1 row for a different host, a `fail` result, and a missing evidence
+  file each fail; a complete record passes.
 - [ ] T129 [US1] Deploy to the T127 host:
   - install `ops/firewall/accesslens-nl2.service`;
   - run `npm run test:g1` there and record G0 + G1 evidence for **that host** in
     `specs/001-accesslens-mvp/gate-evidence.md`;
-  - only then set `SCAN_ENABLED=true` in that host's environment.
+  - run `node scripts/check-scan-enable.mjs <host>` (T187); **only if it passes**, set
+    `SCAN_ENABLED=true` in that host's environment. Writing this task or the tests doesn't
+    count as passing any gate.
 
 **Checkpoint US1**: US1 is fully functional. MVP is deliverable once T129's evidence is recorded.
 
@@ -640,10 +783,20 @@ there is a graceful unavailable state.
 
 ### Tests for User Story 2 (REQUIRED — write first, must FAIL) ⚠️
 
-- [ ] T131 [P] [US2] Verification-order unit tests in `apps/web/tests/unit/evidence-verify.test.ts`:
-  size → per-IP limit → strict schema → `v`/`kid` → MAC (`timingSafeEqual`) → expiry/skew →
-  per-audit cap → daily cap. Also covers current and previous key, a removed previous key →
-  `EVIDENCE_INVALID`, 7 days ± 1 s, and future-dated > 60 s.
+- [ ] T131 [P] [US2] Verification-order unit tests in `apps/web/tests/unit/evidence-verify.test.ts`.
+  The **canonical order** (research R6, contract, ADR-0002) is:
+  1. body size ≤ 64 KB;
+  2. **per-IP rate limit, counting every attempt** (including malformed and forged ones);
+  3. strict schema;
+  4. `v`/`kid`;
+  5. MAC (`timingSafeEqual`);
+  6. expiry/skew;
+  7. **then** the per-audit cap and daily cap, both consumed **only** by verified requests;
+  8. **then** the provider call.
+
+  Each test spies on the stage functions and asserts **call order** and **short-circuit**: a
+  failure at stage N calls no later stage. Also covers current and previous key, a removed
+  previous key → `EVIDENCE_INVALID`, 7 days ± 1 s, and future-dated > 60 s.
 - [ ] T132 [P] [US2] Per-audit AI cap tests in `apps/web/tests/unit/audit-cap.test.ts` (research
   R6 step 7, ADR-0002 Amendment 1, constitution IX):
   - the 26th verified Explain for one `auditId` → `AUDIT_AI_LIMIT_REACHED` with zero provider
@@ -678,8 +831,23 @@ there is a graceful unavailable state.
 - [ ] T135 [P] [US2] Contract tests for `POST /api/explain` in
   `apps/web/tests/integration/api-explain.test.ts`: request and response validate against the
   contract; 400/403/413/429/502/503 with the correct codes, including 429
-  `AUDIT_AI_LIMIT_REACHED`; the per-IP limit counts all attempts; the per-audit and daily caps
-  count only verified requests; `AI_PROVIDER=none` → `AI_DISABLED`.
+  `AUDIT_AI_LIMIT_REACHED`; `AI_PROVIDER=none` → `AI_DISABLED`.
+  - **Malformed attempts** (invalid JSON, unknown keys, wrong types, > 64 KB):
+    - each gets 413 or 400;
+    - each except the oversized body increments the per-IP counter;
+    - none consumes the per-audit or daily cap;
+    - the provider mock records zero calls.
+  - **Forged attempts** (bad MAC, unknown `kid`, altered `help`/`description`/node, expired,
+    future-dated):
+    - each gets 403;
+    - each increments the per-IP counter;
+    - none consumes the per-audit or daily cap;
+    - zero provider calls.
+  - **Mixed sequence**: 20 forged attempts from one IP leave the 21st (valid) request refused
+    with `EXPLAIN_RATE_LIMITED`, while the per-audit and daily counters for that `auditId` stay
+    at 0.
+  - **Verified requests**: only these increment the per-audit and daily counters, and exactly
+    one provider call is made each.
 - [ ] T136 [P] [US2] OpenRouter adapter tests in `apps/web/tests/integration/openrouter.test.ts`,
   with `msw`:
   - request to `https://openrouter.ai/api/v1/chat/completions` with Bearer auth, `model`,
@@ -730,9 +898,20 @@ there is a graceful unavailable state.
   T133 pass.
 - [ ] T147 [US2] Implement `apps/web/src/server/ai/audit-cap.ts` (in-memory per-`auditId`
   counter with 7-day expiry and a 50 000-entry bound), making T132 pass.
-- [ ] T148 [US2] Implement `apps/web/src/app/api/explain/route.ts` (≤ 64 KB body, verify →
-  per-audit cap → daily cap → provider → validated response, emitting `explain.refused` /
-  `explain.call` events), making T135 pass.
+- [ ] T148 [US2] Implement `apps/web/src/app/api/explain/route.ts` in exactly the canonical
+  order from T131:
+  1. body size ≤ 64 KB (else 413);
+  2. per-IP limit on **every** attempt (else 429 `EXPLAIN_RATE_LIMITED`);
+  3. strict schema (else 400);
+  4. `v`/`kid`, MAC, expiry/skew (else 403);
+  5. per-audit cap (else 429 `AUDIT_AI_LIMIT_REACHED`);
+  6. daily cap (else 429 `AI_BUDGET_EXHAUSTED`), with both caps counting verified requests
+     only;
+  7. build `ExplainInput` from the verified evidence;
+  8. provider call → validated response.
+
+  It emits `explain.refused` with the code at each refusal and `explain.call` for the provider
+  call, making T131 (route-level wiring) and T135 pass.
 - [ ] T149 [P] [US2] Implement `apps/web/src/components/ai-panel/AiPanel.tsx` (including the
   per-audit limit-reached state) and annotation persistence in `apps/web/src/lib/storage.ts`
   (T139, T140).
@@ -933,11 +1112,14 @@ keyboard-only. Every step renders sample data, the "Sample data" label stays vis
   - 2a (T029–T033) comes before everything else.
   - M1 (T034–T040) → G0.
   - M2 (T041–T066) depends on M1, because the proxy reuses the URL policy. T047 must precede
-    T064/T066. T065 runs after T062 results. M2 uses a provisional `shm_size`.
+    T064/T066. T065 runs after T062 results. M2 uses a provisional `shm_size`. T185 (OD-12)
+    is resolved (ADR-0001 Amendment 1 Accepted), so T057, T184, and T066 are unblocked by it;
+    G1 is still **not passed**.
   - M3 (T067–T094) depends on M2 (the scanner runs through the proxy). T093 (final `shm_size`)
     needs the T084 fixtures and T090, and must finish before T094.
+  - T188 (scanner contract conformance) is part of M3 and must pass for G2.
 - **US1 (T095–T129)**: depends on G2. T127–T129 (public release) also require G0 + G1 evidence
-  on the target host.
+  on the target host. T187 must pass before T129 sets `SCAN_ENABLED=true`.
 - **US2 (T130–T151)**: depends on US1 (sealed evidence, stored audits). T130 comes first.
 - **US4 (T152–T162)**: depends on US1. Independent of US2.
 - **US5 (T163–T168)**: depends on US1. It includes AI annotations (US2) and comparison (US4)
@@ -995,7 +1177,26 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
 
 ## Notes
 
-- Every open decision has a task placed before the milestone it blocks: OD-9 (T005), OD-11
-  (T021), OD-8 (T025, T047), OD-10 (T065), OD-2 (T127), OD-7 (T128), and OD-6 (T130).
+- **Open decisions and the tasks they block** (as of 2026-10-23):
+
+  | OD | Decision task | Blocks |
+  |---|---|---|
+  | OD-9 TypeScript 7.0 vs 5.9 | T005 | T006–T008, all `typecheck` runs |
+  | OD-11 `web` binding fallback (conditional) | T021 | M0 checkpoint, if T019 fails |
+  | OD-8a CI platform (owner answered GitHub Actions + gitleaks on 2026-10-22; **not yet recorded**) | T025 | T026, T027, T040 (G0 runs in CI) |
+  | OD-8b where G1 runs | T047 | T064, T066, T184 |
+  | OD-10 Docker DNS leakage (conditional) | T065 | T066 |
+  | OD-2 VM/VPS provider | T127 | T129, T187 (host name) |
+  | OD-7 TLS reverse proxy | T128 | T129 |
+  | OD-6 daily AI cap across restarts | T130 | T133, T146, T151 (G3 sign-off) |
+
+  **Resolved**: OD-12, the NL-2 firewall rule order and scoping (ADR-0001 Amendment 1,
+  Accepted 2026-10-23, task T185 `[X]`). It unblocks T057 and T184; T066 (G1) still requires
+  recorded passing evidence.
+
+- **IDs T184–T188 were added on 2026-10-23 without renumbering**, to keep existing task IDs
+  stable. Each runs at the position where it appears in its phase, not in numeric order:
+  T186 after T024 (M0), T185 before T057 and T184 after T060 (M2), T188 after T082 (M3), and
+  T187 before T129 (US1).
 - A gate task records evidence. Writing code or tests never counts as passing a gate.
 - Commit after each task or logical group, and create a PHR for each implementation session.

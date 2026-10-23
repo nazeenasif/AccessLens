@@ -5,6 +5,8 @@
 > segmentation, application-layer egress filtering, host firewall policy, browser sandboxing).
 > These parts protect the same boundary and would change together.
 
+- **Amendments:** Amendment 1 to §3 (NL-2 firewall rule order and scoping) — Accepted
+  2026-10-23, resolves OD-12.
 - **Status:** Accepted (2026-10-22, by the project owner, after review revision 1). Resolves
   plan Open Decisions **OD-1** and **OD-5** and narrows **OD-2**. Acceptance approves the
   design only: **no security gate (G0/G1) has passed**; gates pass only with recorded execution
@@ -115,6 +117,83 @@ Accepted cluster:
 
    Because the docs don't say whether the rules persist, deployment MUST install them
    persistently and run the NL-2 smoke test after every daemon or host restart.
+
+   > **Amendment 1 to §3 — ACCEPTED (2026-10-23, by the project owner; resolves OD-12 via
+   > task T185).** The original §3 text above is preserved as the historical record. From
+   > 2026-10-23 its **"order" bullet is superseded** by this amendment; every other part of
+   > §3 (the range list, the `INPUT` rule, IPv6 off, persistence) stays in force. Proposed
+   > 2026-10-23; accepted the same day.
+   >
+   > **Problem**: the accepted rule order accepts ESTABLISHED/RELATED first, so the prohibited
+   > destination drops are skipped by any flow conntrack already tracks. Three ways that can
+   > happen:
+   > 1. a connection opened before the rules were installed (boot ordering, or rules re-applied
+   >    after a flush);
+   > 2. RELATED flows created by a conntrack helper;
+   > 3. a broad ESTABLISHED/RELATED accept that isn't scoped to the `outbound` subnet and so
+   >    matches unrelated traffic.
+   >
+   > **Proposed rule set**:
+   > - **Drop first, regardless of state.** In `DOCKER-USER`, insert
+   >   `-s <outbound subnet> -d <each prohibited range or Docker bridge subnet> -j DROP` at the
+   >   **top**, before any ACCEPT and with **no** `--ctstate` match. These rules only match
+   >   packets that originate from the proxy and are addressed to a prohibited destination;
+   >   return traffic from public servers has a public source and a container destination, so
+   >   it isn't affected.
+   > - **No broad ESTABLISHED/RELATED accept** in `DOCKER-USER`; leave Docker's own handling of
+   >   established return traffic as it is. If an accept rule is ever needed, it must be scoped
+   >   to `-s <outbound subnet>` and placed **after** the drops.
+   > - **`INPUT`**: insert the drop from the `outbound` subnet to the host's own addresses at
+   >   position 1, ahead of any distribution or ufw ESTABLISHED accept.
+   > - **Startup order and existing flows**: the rules are installed **before** the
+   >   `egress-proxy` container starts (the systemd unit runs `After=docker.service`,
+   >   `Before=` the Compose service unit). After installing, conntrack entries with source
+   >   `<outbound subnet>` are flushed (`conntrack -D -s <outbound subnet>`), which needs the
+   >   conntrack tools on the host.
+   > - **Conntrack helpers**: verify that automatic helper assignment is off
+   >   (`net.netfilter.nf_conntrack_helper=0`, the kernel default since 4.7). No helper is
+   >   configured for the `outbound` subnet.
+   >
+   > **Tests against the running stack (G1)**:
+   > - rule order: the drops are first;
+   > - packet path: the drop-rule counters increase on a probe;
+   > - a pre-existing flow is cut by install plus flush;
+   > - no helper is assigned;
+   > - return traffic from a public endpoint still works.
+   >
+   > **Effect**: replaces the "order" bullet above. No other part of this ADR changes.
+   >
+   > **Scoping and traffic paths (part of the accepted amendment)**. The firewall must enforce
+   > NL-2 on exactly the intended packets and leave unrelated host and container traffic alone.
+   >
+   > *Packet paths on a Docker Engine host with the iptables backend*:
+   >
+   > | Traffic from `egress-proxy` (source in `outbound` subnet) | Netfilter path | Enforced by |
+   > |---|---|---|
+   > | To an internet or prohibited IP | `FORWARD` → `DOCKER-USER` (before Docker's chains; source still the container IP, because masquerade happens later in `POSTROUTING`) | `DOCKER-USER` drops |
+   > | To another container's IP, including after DNAT of a host-published port such as `web:3000` | `PREROUTING` DNAT → `FORWARD` → `DOCKER-USER` with destination = a container IP in a Docker subnet | `DOCKER-USER` Docker-subnet drops |
+   > | To the host's own addresses (bridge gateway, host LAN/public IP, a `docker-proxy` listener) | `INPUT` | `INPUT` drop at position 1 |
+   > | DNS from inside the container to Docker's embedded resolver `127.0.0.11` | Stays in the container namespace; the daemon forwards upstream from the host namespace (`OUTPUT`, not `FORWARD`) | Not affected (proxy resolution keeps working) |
+   >
+   > *Scoping rules*:
+   > - Every rule matches **`-s <outbound subnet>`** (the `outbound` subnet is fixed in
+   >   Compose). The `INPUT` rule additionally matches `-d <host addresses>`. No rule matches
+   >   traffic from other subnets, the host itself, or inbound clients.
+   > - Every rule carries the comment tag `accesslens-nl2`. Install and uninstall add or delete
+   >   **only** tagged rules, idempotently. The scripts never flush chains (`-F`), never change
+   >   chain policies, and never modify Docker-owned chains (`DOCKER`, `DOCKER-FORWARD`,
+   >   `DOCKER-ISOLATION-*`).
+   > - The conntrack flush is limited to `conntrack -D -s <outbound subnet>`. Host SSH sessions,
+   >   `web`'s connections, and other containers' flows are untouched.
+   > - The install script **fails closed** if Docker isn't using the iptables backend (for
+   >   example, the experimental nftables backend, where `DOCKER-USER` doesn't exist), if the
+   >   `outbound` subnet doesn't match Compose, or if `nf_conntrack_helper` ≠ 0. On failure it
+   >   leaves no partial rule set and exits non-zero, so `SCAN_ENABLED` must stay `false`.
+   >
+   > *Validation*: task **T184** checks all of the above against the **live** stack on the G1
+   > host, including that unrelated connections survive install and flush. Accepting this
+   > amendment doesn't mean G1 has passed. G1 passes only through task T066 with recorded
+   > evidence.
 
 4. **Browser sandboxing (resolves OD-5)**:
    - Chromium runs as the non-root `pwuser` with Playwright's `seccomp_profile.json`, keeping
