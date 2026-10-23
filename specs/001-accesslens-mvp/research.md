@@ -546,8 +546,40 @@ trusts any client-supplied field it didn't sign.
     - banned wording (SC-006).
   - A gate counts as passed only with recorded execution evidence (CI run or deploy smoke-test
     log). Documentation never states a gate as passed.
-- **Version note**: TypeScript 7.0 (native compiler) is current. If any tooling proves
-  incompatible during setup, pin TypeScript 5.9.x and record it here (setup-time check).
+- **Version note** (original text, kept for traceability): TypeScript 7.0 (native compiler) is
+  current. If any tooling proves incompatible during setup, pin TypeScript 5.9.x and record it
+  here (setup-time check).
+- **Decision OD-9 (resolved 2026-10-23, task T005)**: pin **`typescript@5.9.3`** (exact) for
+  all workspaces.
+  - **Method**: an isolated probe outside the repository (a scratchpad Next.js app; no
+    application code) on Node v24.18.0 and npm 11.6.2, with the exact pinned stack:
+    `next@16.4.2`, `react`/`react-dom@19.3.1`, `eslint@9` + `eslint-config-next@16.4.2` +
+    `typescript-eslint@8.72.0` (type-aware `recommendedTypeChecked` with `projectService`),
+    `vitest@5.0.5` + `vite@8`, `@types/node@24.19.2`.
+  - **tsconfig** used the strict settings planned for T006: `strict`,
+    `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`.
+  - **Checks per version**: `tsc --noEmit`; `next build` (which includes Next's TypeScript
+    step); `eslint .`; `vitest run`. Then both `tsc` and `next build` were re-run with a
+    planted type error, to prove type checking is active.
+
+    | Result | 7.0.2 | 6.0.3 | 5.9.3 |
+    |---|---|---|---|
+    | `npm install` (normal resolution) | **ERESOLVE**: `typescript-eslint@8.72.0` peer `typescript >=4.8.4 <6.1.0`, required through `eslint-config-next@16.4.2` (`typescript-eslint@^8.56.0`) | ok | ok |
+    | `tsc --noEmit` / planted error detected | ok / yes (TS2322) | ok / yes | ok / yes |
+    | `next build` / planted error detected | ok / yes | ok / yes | ok / yes |
+    | `eslint .` (type-aware) | **fails**: "typescript-eslint does not support TS 7.0" (forced with `--legacy-peer-deps`) | ok | ok |
+    | `vitest run` | ok | ok | ok |
+
+    The `typescript@7.0.2` package also exports only `version.cjs` and `unstable/*` APIs, not
+    the classic compiler API that `typescript-eslint` loads.
+  - **Why 5.9.3, not 6.0.3**: both pass. Accepted ADR-0003 defines the fallback as **5.9.x**,
+    so choosing 6.0 would change an accepted decision. 6.0.3 is recorded as a verified
+    alternative; moving to it needs an ADR-0003 amendment.
+  - **Revisit when**: `typescript-eslint` declares support for TypeScript ≥ 7 and
+    `eslint-config-next` depends on that version. Re-run this probe before changing the pin.
+  - **Scope**: the probe verifies toolchain compatibility only. It isn't a project test run,
+    and it doesn't pass any gate. The in-repo M0 tests (T014, T019, T023, T024, T027, T186)
+    still run when M0 is implemented.
 
 ## R14. Logging and secrets (Principle IV)
 

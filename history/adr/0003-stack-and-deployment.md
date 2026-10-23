@@ -6,6 +6,8 @@
 > [ADR-0001](./0001-scanner-isolation-and-egress-control.md), and this ADR must satisfy it.
 
 - **Status:** Accepted (2026-10-22, by the project owner). Acceptance approves the design only; OD-2, OD-7, OD-8 and OD-9 stay open, and the M0 tests below must pass with recorded evidence.
+- **Addenda:** A — OD-9 resolved 2026-10-23: `typescript@5.9.3`, the accepted fallback (see
+  Addendum A below). OD-2, OD-7, and OD-8 remain open.
 - **Date:** 2026-10-22
 - **Feature:** 001-accesslens-mvp
 - **Context:**
@@ -134,7 +136,26 @@
 | OD-2 | VM/VPS provider and region | Must satisfy ADR-0001 §5 (Docker Engine + host firewall control). Not chosen. |
 | OD-7 | TLS reverse proxy (e.g., Caddy, nginx, Traefik) | Must forward exactly one hop (`TRUSTED_PROXY_HOPS=1`) and not log request bodies. Not chosen. |
 | OD-8 | CI platform and where G1 runs | The repository has no remote yet. G1 needs a Linux host with the firewall rules applied; whether a CI runner can provide that, or G1 runs on a staging host, is undecided. |
-| OD-9 | TypeScript 7.0 vs 5.9.x | Decided by the M0 compatibility test above. |
+| OD-9 | TypeScript 7.0 vs 5.9.x | Decided by the M0 compatibility test above. **Resolved 2026-10-23 → 5.9.3 (Addendum A).** |
+
+### Addendum A — OD-9 resolved (2026-10-23, task T005)
+
+- **Decision**: pin `typescript@5.9.3` (exact) in every workspace. This applies Decision §1's
+  accepted fallback, so no other part of this ADR changes.
+- **Evidence** (full method and results in research R13): an isolated probe on the exact
+  pinned stack (Node 24.18.0, npm 11.6.2, Next.js 16.4.2, React 19.3.1, `eslint-config-next`
+  16.4.2, `typescript-eslint` 8.72.0, Vitest 5.0.5).
+  - **`typescript@7.0.2`**: fails normal npm resolution (`ERESOLVE`), because `typescript-eslint`
+    declares `typescript >=4.8.4 <6.1.0` and `eslint-config-next` depends on it. When forced, the
+    type-aware lint fails ("typescript-eslint does not support TS 7.0").
+  - **`typescript@5.9.3`**: passes `tsc --noEmit`, `next build`, type-aware ESLint, and Vitest,
+    and catches a planted type error in both `tsc` and `next build`.
+- **Alternative verified, not chosen**: `typescript@6.0.3` passed the same checks. It isn't one of
+  this ADR's accepted options (7.0 or the 5.9.x fallback), so adopting it would need a separate
+  amendment.
+- **Revisit trigger**: `typescript-eslint` supports TypeScript ≥ 7 and `eslint-config-next` depends
+  on that release. Re-run the R13 probe first.
+- **Not a gate result**: the M0 tests listed above still run in-repo during M0.
 
 ## References
 

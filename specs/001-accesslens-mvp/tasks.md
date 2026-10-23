@@ -11,7 +11,8 @@ data-model.md, contracts/, quickstart.md) and the ADRs.
 - ADR-0001: Accepted; Amendment 1 (firewall rule order and scoping) **Accepted 2026-10-23**
   (OD-12 resolved by T185).
 - ADR-0002: Accepted, plus Amendment 1 (per-audit cap); **OD-6 OPEN**.
-- ADR-0003: Accepted; **OD-2, OD-7, OD-8, OD-9 OPEN**. The owner chose GitHub Actions and
+- ADR-0003: Accepted, plus Addendum A (OD-9 resolved 2026-10-23 → `typescript@5.9.3`, task
+  T005); **OD-2, OD-7, OD-8 OPEN**. The owner chose GitHub Actions and
   gitleaks for OD-8a on 2026-10-22, but that choice isn't recorded in the ADR yet, so it stays
   OPEN until T025 records it.
 
@@ -63,16 +64,27 @@ CI.
   - comment lines naming which service receives each variable, per the ADR-0001 secret table.
 - [ ] T004 [P] Create `specs/001-accesslens-mvp/gate-evidence.md` with an empty ledger table:
   Gate, Date, Host/Runner, Commit, Command, Result, Evidence link.
-- [ ] T005 **Decision OD-9 (TypeScript version)**:
-  - create a minimal skeleton (`tsconfig.base.json`, one file per workspace) with
-    `typescript@7.0.2`;
-  - run `next build` type-checking, ESLint, and Vitest on it;
-  - if any fails, pin `typescript@5.9.x`;
-  - record the outcome and the pinned version in `specs/001-accesslens-mvp/research.md` (R13)
-    and mark OD-9 resolved in `specs/001-accesslens-mvp/plan.md`.
+- [X] T005 **Decision OD-9 (TypeScript version)**: **resolved 2026-10-23 → pin
+  `typescript@5.9.3`** (exact).
+  - **How it was checked**: a minimal Next.js 16.4.2 skeleton in an isolated scratchpad probe
+    (not committed; no application code), using the T006 strict compiler options, was run with
+    `next build` type-checking, type-aware ESLint (`eslint-config-next@16.4.2` +
+    `typescript-eslint@8.72.0`), Vitest 5.0.5, and `tsc --noEmit`, each with a planted type error.
+  - **Result**:
+    - `typescript@7.0.2` failed npm peer resolution (`ERESOLVE`, `typescript-eslint` peer
+      `<6.1.0`), and when forced, type-aware ESLint refused it;
+    - `typescript@5.9.3` (ADR-0003's accepted fallback) passed every check and caught the
+      planted error;
+    - `6.0.3` also passed, but it isn't an accepted option.
+  - **Recorded in**: `specs/001-accesslens-mvp/research.md` R13 (method and results table),
+    `specs/001-accesslens-mvp/plan.md` (Technical Context and the OD-9 row, Resolved), and
+    `history/adr/0003-stack-and-deployment.md` Addendum A.
+  - **Not a gate or project-test result**: the in-repo M0 tests still have to run.
 - [ ] T006 [P] Configure strict TypeScript in `tsconfig.base.json` (`strict`,
   `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`), with a
-  `tsconfig.json` in each workspace extending it.
+  `tsconfig.json` in each workspace extending it. Add `typescript` pinned **exactly** to
+  `5.9.3` (the T005 decision) as a root devDependency, so every workspace resolves the same
+  compiler.
 - [ ] T007 [P] Configure ESLint (flat config) in `eslint.config.mjs`:
   - forbid `react/no-danger` (`dangerouslySetInnerHTML`), `no-eval`, and `no-implied-eval`;
   - a `no-restricted-syntax` rule rejecting `process.env.NEXT_PUBLIC_*` names containing `KEY`,
@@ -1181,7 +1193,6 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
 
   | OD | Decision task | Blocks |
   |---|---|---|
-  | OD-9 TypeScript 7.0 vs 5.9 | T005 | T006–T008, all `typecheck` runs |
   | OD-11 `web` binding fallback (conditional) | T021 | M0 checkpoint, if T019 fails |
   | OD-8a CI platform (owner answered GitHub Actions + gitleaks on 2026-10-22; **not yet recorded**) | T025 | T026, T027, T040 (G0 runs in CI) |
   | OD-8b where G1 runs | T047 | T064, T066, T184 |
@@ -1190,7 +1201,9 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
   | OD-7 TLS reverse proxy | T128 | T129 |
   | OD-6 daily AI cap across restarts | T130 | T133, T146, T151 (G3 sign-off) |
 
-  **Resolved**: OD-12, the NL-2 firewall rule order and scoping (ADR-0001 Amendment 1,
+  **Resolved**: OD-9, the TypeScript version → `typescript@5.9.3` (ADR-0003 Addendum A, task T005
+  `[X]`, evidence in research R13), which unblocks T006–T008. Also resolved: OD-12, the NL-2
+  firewall rule order and scoping (ADR-0001 Amendment 1,
   Accepted 2026-10-23, task T185 `[X]`). It unblocks T057 and T184; T066 (G1) still requires
   recorded passing evidence.
 
