@@ -1,0 +1,11 @@
+node_modules/
+.next/
+dist/
+coverage/
+package-lock.json
+specs/
+history/
+.specify/
+.claude/
+ops/seccomp/playwright-seccomp-profile.json
+CLAUDE.md

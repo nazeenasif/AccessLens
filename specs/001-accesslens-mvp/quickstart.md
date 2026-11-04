@@ -77,10 +77,17 @@ is set.
 docker compose up --build        # web on http://localhost:3000; scanner and egress-proxy unpublished
 ```
 
-- **Hot reload for UI work** runs `web` **inside** Compose, through a development profile that
-  bind-mounts the source and runs `next dev`, so the internal-network topology is preserved. No
-  profile ever publishes the scanner or proxy ports. The exact profile name and command are
-  defined at M0 and recorded here.
+- **Hot reload for UI work** (task T022) runs `web` **inside** Compose through the `dev` profile.
+  The profile bind-mounts the source and runs `next dev`, bound to its public-network address
+  `172.30.10.11`, so the internal-network topology is preserved:
+
+  ```bash
+  docker compose --profile dev up --build web-dev scanner egress-proxy
+  ```
+
+  - Name the services explicitly. A bare `docker compose --profile dev up` also starts `web`,
+    and both publish port 3000.
+  - No profile publishes the scanner or proxy ports.
 - Open `http://localhost:3000/demo` for the guided demo (no AI key or scanner needed).
 - `http://localhost:3000` shows the scanning-disabled state while `SCAN_ENABLED=false`, which is
   the default and is required on Docker Desktop. Scanner development uses local fixtures

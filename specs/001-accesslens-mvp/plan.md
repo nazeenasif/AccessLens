@@ -250,11 +250,11 @@ blocks.
 | OD-5 | Chromium sandbox | **Resolved** by ADR-0001 | — | Non-root + seccomp; no `--no-sandbox` with scanning enabled. |
 | OD-6 | Daily AI cap across `web` restarts | **Open** | US2 | ADR-0002 options: provider-side key limit / persisted counter / both. |
 | OD-7 | TLS reverse proxy | **Open** | US1 public release | ADR-0003. |
-| OD-8 | CI platform and where G1 runs | **Open** | M2 exit (G1) | ADR-0003. The repo has no remote yet. |
+| OD-8 | CI platform and where G1 runs | **OD-8a Resolved** 2026-10-23 (task T025): GitHub Actions + gitleaks v8.30.1 (ADR-0003 Addendum B). **OD-8b Open** (task T047) | M2 exit (G1) | The repo has no remote yet, so CI can't run until one is added. |
 | OD-9 | TypeScript 7.0 vs 5.9 | **Resolved** 2026-10-23 (task T005): `typescript@5.9.3` | — | Compatibility probe in research R13: 7.0.2 → npm ERESOLVE and typescript-eslint refuses TS 7; 5.9.3 and 6.0.3 both pass `tsc`, `next build`, type-aware ESLint, and Vitest, and catch a planted type error. 5.9.3 chosen as ADR-0003's accepted fallback. Recorded in ADR-0003 Addendum A. |
 | OD-10 | Docker embedded-DNS leakage from `scanner` | **Open** — conditional | M2 exit (G1) | If the G1 DNS check shows external resolution, choose a mitigation and add an ADR-0001 addendum. |
 | OD-12 | NL-2 firewall rule order and scoping | **Resolved** 2026-10-23 by ADR-0001 Amendment 1 (Accepted; task T185) | — | Drop-first, state-independent drops scoped to `-s <outbound>`; no broad ESTABLISHED/RELATED accept; `INPUT` drop at position 1; tagged, idempotent rules; scoped conntrack flush; helpers off; fail closed on a non-iptables backend. Implemented by T057, validated live by T184, gated by T066 (G1 **not passed**). |
-| OD-11 | `web` binding fallback | **Open** — conditional | M0 | If the ADR-0003 binding test fails, ADR-0001's fallback (separate control network or reversed control connection) needs a superseding ADR. |
+| OD-11 | `web` binding fallback | **Not needed** 2026-10-23 (task T021) | — | T019 passed on the composed stack (Docker Desktop 29.2.0): `web` accepts on its public address, refuses on `scan-ctl`, and serves through the published host port. A negative control (bind-all) made T019 fail, so the test discriminates. |
 
 ## Risks
 

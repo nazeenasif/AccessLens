@@ -1,0 +1,169 @@
+# AccessLens Compose stack (task T018) — topology per ADR-0001 (Accepted).
+#   web           public + scan-ctl          (only service with a published port)
+#   scanner       scan-ctl + scan-egress     (internal networks only; no route except egress-proxy)
+#   egress-proxy  scan-egress + outbound     (only scan-path component with an outbound route)
+# Required secrets use ${VAR:?} so a missing value fails loudly. No env_file is used, so each
+# service receives only the variables listed for it (ADR-0001 secret table).
+# SCAN_ENABLED defaults to false and must stay false until G0 + G1 evidence exists for the host.
+name: accesslens
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: accesslens/web:local
+    ports:
+      - "3000:3000"
+    networks:
+      public:
+        ipv4_address: 172.30.10.10
+      scan-ctl:
+        ipv4_address: 172.30.20.10
+    environment: &web-env
+      NODE_ENV: production
+      PORT: "3000"
+      WEB_PUBLIC_SUBNET: 172.30.10.0/24
+      NEXT_TELEMETRY_DISABLED: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCAN_ENABLED: ${SCAN_ENABLED:-false}
+      AI_PROVIDER: ${AI_PROVIDER:-openrouter}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-900}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-20000}
+      AI_DAILY_REQUEST_CAP: ${AI_DAILY_REQUEST_CAP:-500}
+      AI_EXPLAINS_PER_AUDIT: ${AI_EXPLAINS_PER_AUDIT:-25}
+      EVIDENCE_SIGNING_SECRET: ${EVIDENCE_SIGNING_SECRET:?set EVIDENCE_SIGNING_SECRET in .env}
+      EVIDENCE_SIGNING_SECRET_PREVIOUS: ${EVIDENCE_SIGNING_SECRET_PREVIOUS:-}
+      SCANNER_URL: http://172.30.20.20:4001
+      SCANNER_INTERNAL_TOKEN: ${SCANNER_INTERNAL_TOKEN:?set SCANNER_INTERNAL_TOKEN in .env}
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+      RL_AUDITS_PER_10M: ${RL_AUDITS_PER_10M:-5}
+      RL_EXPLAINS_PER_10M: ${RL_EXPLAINS_PER_10M:-20}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Development profile (task T022): `docker compose --profile dev up web-dev scanner egress-proxy`.
+  # Runs `next dev` inside Compose with a source bind-mount, on the same networks as `web`, bound
+  # to its public-network address only. No scanner or egress-proxy ports are published in any profile.
+  web-dev:
+    profiles: [dev]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: deps
+    image: accesslens/web-dev:local
+    command: ["npx", "next", "dev", "apps/web", "--hostname", "172.30.10.11", "--port", "3000"]
+    ports:
+      - "3000:3000"
+    networks:
+      public:
+        ipv4_address: 172.30.10.11
+      scan-ctl:
+        ipv4_address: 172.30.20.11
+    environment:
+      <<: *web-env
+      NODE_ENV: development
+    volumes:
+      - ./tsconfig.base.json:/app/tsconfig.base.json:ro
+      - ./apps/web:/app/apps/web
+      - ./packages/shared:/app/packages/shared
+      - /app/apps/web/node_modules
+      - /app/apps/web/.next
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  scanner:
+    build:
+      context: .
+      dockerfile: services/scanner/Dockerfile
+    image: accesslens/scanner:local
+    networks:
+      scan-ctl:
+        ipv4_address: 172.30.20.20
+      scan-egress:
+        ipv4_address: 172.30.30.20
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCANNER_INTERNAL_TOKEN: ${SCANNER_INTERNAL_TOKEN:?set SCANNER_INTERNAL_TOKEN in .env}
+      PROXY_CONTROL_TOKEN: ${PROXY_CONTROL_TOKEN:?set PROXY_CONTROL_TOKEN in .env}
+      EGRESS_PROXY_ADDR: 172.30.30.30:3128
+      SCAN_NAV_TIMEOUT_MS: ${SCAN_NAV_TIMEOUT_MS:-30000}
+      SCAN_ANALYSIS_BUDGET_MS: ${SCAN_ANALYSIS_BUDGET_MS:-20000}
+      SCAN_TEARDOWN_MS: ${SCAN_TEARDOWN_MS:-5000}
+      SCAN_TOTAL_TIMEOUT_MS: ${SCAN_TOTAL_TIMEOUT_MS:-60000}
+      SCAN_MAX_DOM_ELEMENTS: ${SCAN_MAX_DOM_ELEMENTS:-50000}
+      SCAN_CONCURRENCY: ${SCAN_CONCURRENCY:-2}
+      SCAN_QUEUE: ${SCAN_QUEUE:-4}
+      SCAN_MAX_BYTES: ${SCAN_MAX_BYTES:-15728640}
+      SCAN_MAX_REQUESTS: ${SCAN_MAX_REQUESTS:-300}
+    init: true
+    shm_size: 1g # provisional; final value measured in M3 (task T093)
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./ops/seccomp/playwright-seccomp-profile.json
+    mem_limit: 1.5g
+    cpus: 1.5
+    pids_limit: 512
+    restart: unless-stopped
+
+  egress-proxy:
+    build:
+      context: .
+      dockerfile: services/egress-proxy/Dockerfile
+    image: accesslens/egress-proxy:local
+    networks:
+      scan-egress:
+        ipv4_address: 172.30.30.30
+      outbound:
+        ipv4_address: 172.30.40.30
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PROXY_CONTROL_TOKEN: ${PROXY_CONTROL_TOKEN:?set PROXY_CONTROL_TOKEN in .env}
+      SCAN_MAX_BYTES: ${SCAN_MAX_BYTES:-15728640}
+      SCAN_MAX_REQUESTS: ${SCAN_MAX_REQUESTS:-300}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 128
+    restart: unless-stopped
+
+networks:
+  public:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+  scan-ctl:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.20.0/24
+  scan-egress:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.30.0/24
+  outbound:
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 172.30.40.0/24

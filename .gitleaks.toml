@@ -1,0 +1,26 @@
+# gitleaks config (tasks T026/T027; ADR-0003 Addendum B). Extends the built-in default rules.
+title = "AccessLens gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "openrouter-api-key"
+description = "OpenRouter API key (sk-or- prefix)"
+regex = '''sk-or-(?:v1-)?[A-Za-z0-9]{16,}'''
+keywords = ["sk-or-"]
+
+[[rules]]
+id = "base64-secret-assignment"
+description = "Base64 value of 32+ bytes assigned to a secret/token/key variable"
+regex = '''(?i)(?:secret|token|key|password)[A-Za-z0-9_]*\s*[:=]\s*["']?([A-Za-z0-9+/]{43,}={0,2})["']?'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["secret", "token", "key", "password"]
+
+# No path allowlists: prompt history (history/) records user input verbatim, so it is scanned too.
+[allowlist]
+description = "Documented .env.example placeholders only"
+regexes = [
+  '''replace-with-random-(secret|token)''',
+]

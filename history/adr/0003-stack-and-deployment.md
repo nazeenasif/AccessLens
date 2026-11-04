@@ -6,8 +6,12 @@
 > [ADR-0001](./0001-scanner-isolation-and-egress-control.md), and this ADR must satisfy it.
 
 - **Status:** Accepted (2026-10-22, by the project owner). Acceptance approves the design only; OD-2, OD-7, OD-8 and OD-9 stay open, and the M0 tests below must pass with recorded evidence.
-- **Addenda:** A — OD-9 resolved 2026-10-23: `typescript@5.9.3`, the accepted fallback (see
-  Addendum A below). OD-2, OD-7, and OD-8 remain open.
+- **Addenda:**
+  - A — OD-9 resolved 2026-10-23: `typescript@5.9.3`, the accepted fallback (see Addendum A
+    below).
+  - B — OD-8a resolved 2026-10-23: CI on GitHub Actions; the diff secret scan uses gitleaks
+    v8.30.1 (see Addendum B below).
+  - OD-2, OD-7, and OD-8b (where G1 runs) remain open.
 - **Date:** 2026-10-22
 - **Feature:** 001-accesslens-mvp
 - **Context:**
@@ -156,6 +160,24 @@
 - **Revisit trigger**: `typescript-eslint` supports TypeScript ≥ 7 and `eslint-config-next` depends
   on that release. Re-run the R13 probe first.
 - **Not a gate result**: the M0 tests listed above still run in-repo during M0.
+
+### Addendum B — OD-8a resolved (2026-10-23, task T025)
+
+- **Decision**: the owner chose this on 2026-10-22; it is recorded here on 2026-10-23.
+  - **CI**: GitHub Actions, with the workflow at `.github/workflows/ci.yml`.
+  - **Diff and history secret scan**: **gitleaks v8.30.1**, run from the official pinned image
+    `ghcr.io/gitleaks/gitleaks:v8.30.1` through `npm run check:secrets:diff`, identically in CI and
+    locally. The config is `.gitleaks.toml`: the default rules, plus rules for the `sk-or-` prefix
+    and base64 secrets of 32 bytes or more.
+- **Why the binary, not `gitleaks-action`**: the action's README states it needs a
+  `GITLEAKS_LICENSE` for organization-owned repositories. Running the pinned binary avoids
+  that dependency, and the same command runs on a developer machine.
+- **Pinned action versions** (latest releases on 2026-10-23): `actions/checkout@v7.0.1` and
+  `actions/setup-node@v7.1.0`.
+- **Constraint**: the repository has **no git remote** yet, so the workflow **can't run** until
+  one is added. "CI green" for the M0 checkpoint stays unverified until then.
+- **Still open**: **OD-8b**, where G1 runs (a Linux host with the firewall rules applied), stays
+  open; it is task T047.
 
 ## References
 

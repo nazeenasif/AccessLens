@@ -1,0 +1,47 @@
+{
+  "name": "accesslens",
+  "private": true,
+  "version": "0.0.0",
+  "description": "AI-assisted website accessibility auditing and remediation for freelance developers and small agencies.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "services/egress-proxy",
+    "services/scanner",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "test": "vitest run --project unit --project integration --project security --project config",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:security": "vitest run --project security",
+    "test:config": "vitest run --project config",
+    "test:ci": "vitest run --reporter=default --reporter=json --outputFile=test-results/vitest.json",
+    "test:assert": "node scripts/assert-required-tests.mjs test-results/vitest.json",
+    "test:g1": "node scripts/run-g1.mjs",
+    "test:wcag": "vitest run --project integration services/scanner/tests/integration/wcag-fixtures.test.ts",
+    "bench:axe": "npm run bench -w services/scanner",
+    "test:e2e": "playwright test --config e2e/playwright.config.ts",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:secrets:diff": "node scripts/check-secrets-diff.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.2",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.0",
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "yaml": "2.9.1"
+  }
+}

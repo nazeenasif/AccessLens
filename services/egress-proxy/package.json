@@ -1,0 +1,13 @@
+{
+  "name": "@accesslens/egress-proxy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@accesslens/shared": "0.0.0"
+  }
+}

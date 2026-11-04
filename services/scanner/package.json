@@ -1,0 +1,16 @@
+{
+  "name": "@accesslens/scanner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@accesslens/shared": "0.0.0",
+    "@axe-core/playwright": "4.14.0",
+    "axe-core": "4.14.0",
+    "playwright": "1.64.1"
+  }
+}

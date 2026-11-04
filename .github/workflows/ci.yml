@@ -1,0 +1,72 @@
+# AccessLens CI (task T026; ADR-0003 Addendum B). No live AI providers and no external sites.
+# SCAN_ENABLED is never set here; it defaults to false everywhere (task T186).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout (full history for the secret scan)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js (from .nvmrc)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build web (for the client-bundle secret scan)
+        run: npm run build -w apps/web
+
+      - name: Client-bundle secret scan
+        run: npm run check:secrets
+
+      - name: Diff/history secret scan (gitleaks v8.30.1)
+        env:
+          # Push: only the pushed range. Pull request: base..head. Otherwise: full history.
+          GITLEAKS_LOG_OPTS: >-
+            ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+                && format('{0}..{1}', github.event.before, github.sha)
+              || github.event_name == 'pull_request'
+                && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+              || '--all' }}
+        run: npm run check:secrets:diff
+
+      # One run of every project (unit, integration, security, config). Docker and gitleaks are
+      # REQUIRED here: a missing tool FAILS the suite instead of skipping it.
+      - name: Tests (all projects; Docker and gitleaks required)
+        env:
+          ACCESSLENS_REQUIRE_DOCKER: "1"
+          ACCESSLENS_REQUIRE_GITLEAKS: "1"
+        run: npm run test:ci
+
+      # Independent audit of the JSON report: every required Docker/gitleaks-backed test must have
+      # executed and passed, and only allowlisted tests may be skipped. Runs even if tests failed.
+      - name: Assert required tests executed (no skip counts as green)
+        if: always()
+        run: npm run test:assert

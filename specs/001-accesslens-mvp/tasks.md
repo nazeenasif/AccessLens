@@ -50,19 +50,19 @@ Explain.
 **Purpose**: Monorepo, toolchain, Compose skeleton per ADR-0001, the M0 tests from ADR-0003, and
 CI.
 
-- [ ] T001 Create root `package.json`:
+- [X] T001 Create root `package.json`:
   - npm workspaces `apps/web`, `services/scanner`, `services/egress-proxy`, `packages/shared`;
   - `"engines": { "node": ">=24 <25" }`;
   - scripts `test`, `test:unit`, `test:integration`, `test:security`, `test:g1`, `test:wcag`,
     `bench:axe`, `test:e2e`, `check:secrets`, `typecheck`, `lint`;
   - also create `.nvmrc` containing `24`.
-- [ ] T002 [P] Create `.gitignore` covering `node_modules/`, `.next/`, `coverage/`,
+- [X] T002 [P] Create `.gitignore` covering `node_modules/`, `.next/`, `coverage/`,
   `test-results/`, `.env`, `.env.*`, and `!.env.example`.
-- [ ] T003 [P] Create `.env.example` with a placeholder for every variable in quickstart §2:
+- [X] T003 [P] Create `.env.example` with a placeholder for every variable in quickstart §2:
   - no real values;
   - `SCAN_ENABLED=false`, `AI_PROVIDER=openrouter`;
   - comment lines naming which service receives each variable, per the ADR-0001 secret table.
-- [ ] T004 [P] Create `specs/001-accesslens-mvp/gate-evidence.md` with an empty ledger table:
+- [X] T004 [P] Create `specs/001-accesslens-mvp/gate-evidence.md` with an empty ledger table:
   Gate, Date, Host/Runner, Commit, Command, Result, Evidence link.
 - [X] T005 **Decision OD-9 (TypeScript version)**: **resolved 2026-10-23 → pin
   `typescript@5.9.3`** (exact).
@@ -80,33 +80,35 @@ CI.
     `specs/001-accesslens-mvp/plan.md` (Technical Context and the OD-9 row, Resolved), and
     `history/adr/0003-stack-and-deployment.md` Addendum A.
   - **Not a gate or project-test result**: the in-repo M0 tests still have to run.
-- [ ] T006 [P] Configure strict TypeScript in `tsconfig.base.json` (`strict`,
+- [X] T006 [P] Configure strict TypeScript in `tsconfig.base.json` (`strict`,
   `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`), with a
   `tsconfig.json` in each workspace extending it. Add `typescript` pinned **exactly** to
   `5.9.3` (the T005 decision) as a root devDependency, so every workspace resolves the same
   compiler.
-- [ ] T007 [P] Configure ESLint (flat config) in `eslint.config.mjs`:
+- [X] T007 [P] Configure ESLint (flat config) in `eslint.config.mjs`:
   - forbid `react/no-danger` (`dangerouslySetInnerHTML`), `no-eval`, and `no-implied-eval`;
   - a `no-restricted-syntax` rule rejecting `process.env.NEXT_PUBLIC_*` names containing `KEY`,
     `SECRET`, or `TOKEN`;
   - also add Prettier config in `.prettierrc`.
-- [ ] T008 [P] Configure Vitest projects (unit, integration, security per workspace) in
+  - *Done 2026-10-23*: `eslint@9.39.5` (latest 9.x). npm marks ESLint 9 "no longer supported", but ESLint 10 is incompatible because `eslint-config-next@16.4.2`'s `eslint-plugin-react`, `-import`, and `-jsx-a11y` declare ESLint ≤ 9. The rules were verified to fire on sample violations. **Owner review.**
+- [X] T008 [P] Configure Vitest projects (unit, integration, security per workspace) in
   `vitest.workspace.ts`.
-- [ ] T009 [P] Scaffold `packages/shared/package.json` (exact `zod@4.6.7`, `ipaddr.js@2.5.0`) and
+  - *Done 2026-10-23*: projects are defined in **`vitest.config.ts` (`test.projects`)** instead of `vitest.workspace.ts`, because Vitest deprecated the workspace file in 3.2. `passWithNoTests` is on while layers are still empty.
+- [X] T009 [P] Scaffold `packages/shared/package.json` (exact `zod@4.6.7`, `ipaddr.js@2.5.0`) and
   `packages/shared/src/index.ts`.
-- [ ] T010 [P] Scaffold `services/egress-proxy/package.json` (no browser dependencies) and
+- [X] T010 [P] Scaffold `services/egress-proxy/package.json` (no browser dependencies) and
   `services/egress-proxy/src/main.ts` (placeholder entrypoint).
-- [ ] T011 [P] Scaffold `services/scanner/package.json` (exact `playwright@1.64.1`,
+- [X] T011 [P] Scaffold `services/scanner/package.json` (exact `playwright@1.64.1`,
   `@axe-core/playwright@4.14.0`, `axe-core@4.14.0`) and `services/scanner/src/main.ts`.
-- [ ] T012 [P] Scaffold the Next.js 16.4 app in `apps/web/`:
+- [X] T012 [P] Scaffold the Next.js 16.4 app in `apps/web/`:
   - App Router, `output: "standalone"` in `apps/web/next.config.ts`;
   - React 19.3, Tailwind CSS 4.3, Radix UI primitives;
   - `apps/web/src/app/layout.tsx` with `lang="en"`.
-- [ ] T013 [P] Vendor Playwright's seccomp profile from
+- [X] T013 [P] Vendor Playwright's seccomp profile from
   `microsoft/playwright` `utils/docker/seccomp_profile.json` at tag `v1.64.1` into
   `ops/seccomp/playwright-seccomp-profile.json`, recording the source URL and commit SHA in
   `ops/seccomp/SOURCE.md`.
-- [ ] T014 Write the Compose configuration test in `tests/config/compose.test.ts`. It parses
+- [X] T014 Write the Compose configuration test in `tests/config/compose.test.ts`. It parses
   `docker-compose.yml` and asserts every item in ADR-0003's "Compose configuration test" list:
   - no `ports` on `scanner` or `egress-proxy`;
   - `scan-ctl`/`scan-egress` are `internal: true`;
@@ -120,13 +122,18 @@ CI.
   - one replica each.
 
   Confirm it fails.
-- [ ] T015 [P] Create `apps/web/Dockerfile` (multi-stage, pinned Node 24 slim tag, non-root
+- [X] T015 [P] Create `apps/web/Dockerfile` (multi-stage, pinned Node 24 slim tag, non-root
   runtime user, standalone output).
-- [ ] T016 [P] Create `services/scanner/Dockerfile` (`FROM
+  - *Created and statically checked (pinned bases, non-root `USER`). Not yet built*: the build is verified by T024, which is pending Docker.
+  - *M0 review 2026-10-23*: base image aligned to **`node:24.22.1-bookworm-slim`**. That's the latest Node 24 LTS, a security release dated 2026-10-20, and identical to the Node bundled in the pinned Playwright image. Rebuilt; it runs v24.22.1 as UID 1000.
+- [X] T016 [P] Create `services/scanner/Dockerfile` (`FROM
   mcr.microsoft.com/playwright:v1.64.1-noble`, runtime `USER pwuser`).
-- [ ] T017 [P] Create `services/egress-proxy/Dockerfile` (multi-stage, pinned Node 24 slim tag,
+  - *Created; not yet built (T024 pending Docker)*.
+- [X] T017 [P] Create `services/egress-proxy/Dockerfile` (multi-stage, pinned Node 24 slim tag,
   non-root runtime user, no browser).
-- [ ] T018 Create `docker-compose.yml` per ADR-0001 §1/§4 so that T014 passes:
+  - *Created; not yet built (T024 pending Docker)*.
+  - *M0 review 2026-10-23*: aligned to **`node:24.22.1-bookworm-slim`** (same reason as T015). Rebuilt; it runs v24.22.1 as UID 1000.
+- [X] T018 Create `docker-compose.yml` per ADR-0001 §1/§4 so that T014 passes:
   - networks `public`, `scan-ctl` (internal), `scan-egress` (internal, fixed subnet), and
     `outbound` (fixed IPv4 subnet, `enable_ipv6: false`);
   - `web` publishes 3000, with `read_only: true`, `tmpfs` for `/tmp` and the Next.js runtime
@@ -135,25 +142,30 @@ CI.
     until T093, read-only rootfs + `tmpfs /tmp`, resource limits);
   - `egress-proxy` with a fixed IP;
   - env allowlists per service.
-- [ ] T019 Write the `web` binding test in `tests/config/web-binding.test.ts`. On the composed
+- [X] T019 Write the `web` binding test in `tests/config/web-binding.test.ts`. On the composed
   stack it asserts that `web` accepts TCP on its `public` address and refuses TCP on its
   `scan-ctl` address. Confirm it fails.
-- [ ] T020 Configure `web`'s listener to bind only to its `public`-network address (Next.js
+  - *Done 2026-10-23 (Docker Desktop 29.2.0)*: **negative control first**. A temporary override binding `web` to `0.0.0.0` made the test **fail** on "refuses TCP on the scan-ctl address". With the T020 entrypoint: **3/3 pass** (public accepted, scan-ctl refused, host port 3000 → 200). The socket table shows a single listener, 172.30.10.10:3000.
+- [X] T020 Configure `web`'s listener to bind only to its `public`-network address (Next.js
   standalone `HOSTNAME`, set from the container's `public` interface at start) in
   `apps/web/docker-entrypoint.sh` and `docker-compose.yml`, making T019 pass.
-- [ ] T021 **Decision OD-11 (conditional)**: only if T019 can't pass, write a superseding ADR in
+  - *Done and verified 2026-10-23*: T019 passes, and the entrypoint logs `binding web to 172.30.10.10:3000`. The selector unit test passes 4/4.
+- [X] T021 **Decision OD-11 (conditional)**: only if T019 can't pass, write a superseding ADR in
   `history/adr/0004-scanner-control-network-fallback.md` choosing between a separate control
   network and a reversed control connection, and update `docker-compose.yml`. Otherwise mark
   OD-11 "not needed" in `specs/001-accesslens-mvp/plan.md`.
-- [ ] T022 [P] Add a `dev` Compose profile in `docker-compose.yml` that runs `web` with `next
+  - *Resolved 2026-10-23: **not needed***. T019 passed, including the published host port, so no fallback ADR is required. OD-11 is marked not needed in `plan.md`.
+- [X] T022 [P] Add a `dev` Compose profile in `docker-compose.yml` that runs `web` with `next
   dev` and a source bind-mount **inside** Compose, with no scanner or proxy ports published.
   Record the exact command in `specs/001-accesslens-mvp/quickstart.md` §3.
-- [ ] T023 [P] Write the build secret-scan script `scripts/check-secrets.mjs` (greps
+  - *Run and verified 2026-10-23*: the first run served HTTP 500 because `tsconfig.base.json` wasn't mounted. Fixed (read-only mount), and `NODE_ENV=development` was set for `web-dev`. Re-run: HTTP 200, bound to 172.30.10.11, scan-ctl refused, no scanner or proxy ports.
+- [X] T023 [P] Write the build secret-scan script `scripts/check-secrets.mjs` (greps
   `apps/web/.next/static` for secret env var names and the `sk-or-` prefix; non-zero exit on a
   hit) and its test `tests/config/check-secrets.test.ts`.
-- [ ] T024 [P] Write the image-user test `tests/config/images-nonroot.test.ts`: builds each
+- [X] T024 [P] Write the image-user test `tests/config/images-nonroot.test.ts`: builds each
   image and asserts its runtime UID ≠ 0 and base image tags are pinned (no `latest`).
-- [ ] T186 [P] Write the scanning-default guard test `tests/config/scan-enabled-default.test.ts`:
+  - *Done 2026-10-23*: all three images built. **7/7 pass**: pinned tags (3), the build, and non-root UIDs (web `node`/1000, scanner `pwuser`/1001, egress-proxy `node`/1000). Node versions: web and egress-proxy v24.18.0; scanner v24.22.1 (bundled in the Playwright image).
+- [X] T186 [P] Write the scanning-default guard test `tests/config/scan-enabled-default.test.ts`:
   - `.env.example` sets `SCAN_ENABLED=false`;
   - no service or profile in `docker-compose.yml` sets `SCAN_ENABLED` to anything but `false`,
     and none sets it from an un-defaulted variable that could resolve to `true`;
@@ -164,28 +176,32 @@ CI.
     T116.
 
   Runs in the `config` project.
-- [ ] T025 **Decision OD-8a (CI platform)**: choose the CI platform (the repository needs a
+  - *Done*: 4 passed, plus 1 skip reserved for T116 as specified. A mutation check (default flipped to `true`) made it fail.
+- [X] T025 **Decision OD-8a (CI platform)**: choose the CI platform (the repository needs a
   remote) and record it as an addendum in `history/adr/0003-stack-and-deployment.md` and in the
   OD-8 row of `specs/001-accesslens-mvp/plan.md`. Where G1 runs is decided separately in T047.
-- [ ] T026 Create the CI pipeline config at the path the T025 platform requires. It runs
+- [X] T026 Create the CI pipeline config at the path the T025 platform requires. It runs
   `npm ci`, `lint`, `typecheck`, `test:unit`, `test:integration`, `test:security`,
   `check:secrets`, the `tests/config` suite, and a **diff/history secret scan**
   (`npm run check:secrets:diff`). That scan checks every pushed commit range for key-like
   values, including the `sk-or-` prefix, base64 secrets of 32 bytes or more, and private keys.
   The scanner tool is chosen together with the T025 CI platform and recorded in the same
   ADR-0003 addendum. The pipeline runs with no live AI and no external sites.
-- [ ] T027 Write the diff secret-scan verification test `tests/config/diff-secret-scan.test.ts`:
+  - *Created at `.github/workflows/ci.yml` (actions pinned by SHA). **Not executed***: the repository has no remote, so "CI green" is unverified.
+  - *M0 review 2026-10-23*: CI now runs every project once in **required mode** (`ACCESSLENS_REQUIRE_DOCKER=1`, `ACCESSLENS_REQUIRE_GITLEAKS=1`; a missing tool fails instead of skipping), followed by `npm run test:assert` (`scripts/assert-required-tests.mjs`, `if: always()`). The audit requires 10 named tool-backed tests to pass and allows only 4 allowlisted skips. Both behaviours are proven by `tests/config/ci-strictness.test.ts`. Verified locally in CI mode: 47 passed / 4 allowlisted skips / 0 failed; audit OK. **Still not executed on GitHub** (no remote).
+- [X] T027 Write the diff secret-scan verification test `tests/config/diff-secret-scan.test.ts`:
   - it creates a temporary git repository with a commit containing a fake `sk-or-` key and a
     fake 48-byte base64 secret, and asserts `npm run check:secrets:diff` fails on it;
   - a clean commit and `.env.example` placeholders pass;
   - add the `check:secrets:diff` script to the root `package.json`.
 
   This closes the constitution merge-gate item "no secrets in diff".
-- [ ] T028 [P] Create the root `README.md` (purpose, architecture summary linking ADR-0001–0003,
+  - *Done*: 3/3 passed with gitleaks v8.30.1 (checksum-verified release binary on PATH). Full-history scan of this repo: no leaks.
+- [X] T028 [P] Create the root `README.md` (purpose, architecture summary linking ADR-0001–0003,
   setup, env vars, test commands, `SCAN_ENABLED=false` notice, data retention) from
   `specs/001-accesslens-mvp/quickstart.md`.
 
-**Checkpoint M0**: CI green; T005, T014, T019, T023, T024, T027, and T186 pass; `/api/health` isn't built
+**Checkpoint M0** — *status 2026-10-23: all M0 tasks done and verified locally; the "CI green" criterion is **pending**, because the repository has no git remote, so the GitHub Actions workflow has never run.* Criteria: CI green; T005, T014, T019, T023, T024, T027, and T186 pass; `/api/health` isn't built
 yet.
 
 ---
@@ -1193,7 +1209,6 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
 
   | OD | Decision task | Blocks |
   |---|---|---|
-  | OD-11 `web` binding fallback (conditional) | T021 | M0 checkpoint, if T019 fails |
   | OD-8a CI platform (owner answered GitHub Actions + gitleaks on 2026-10-22; **not yet recorded**) | T025 | T026, T027, T040 (G0 runs in CI) |
   | OD-8b where G1 runs | T047 | T064, T066, T184 |
   | OD-10 Docker DNS leakage (conditional) | T065 | T066 |
@@ -1201,6 +1216,7 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
   | OD-7 TLS reverse proxy | T128 | T129 |
   | OD-6 daily AI cap across restarts | T130 | T133, T146, T151 (G3 sign-off) |
 
+  **Not needed**: OD-11, the `web` binding fallback (T019 passed; T021 `[X]`).
   **Resolved**: OD-9, the TypeScript version → `typescript@5.9.3` (ADR-0003 Addendum A, task T005
   `[X]`, evidence in research R13), which unblocks T006–T008. Also resolved: OD-12, the NL-2
   firewall rule order and scoping (ADR-0001 Amendment 1,
