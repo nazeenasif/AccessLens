@@ -17,6 +17,8 @@ export default defineConfig({
           name: "config",
           include: ["tests/config/**/*.test.ts"],
           environment: "node",
+          // Docker-backed files share fixed Compose subnets and port 3000, so they can't overlap.
+          fileParallelism: false,
           testTimeout: 600_000,
           hookTimeout: 900_000,
         },

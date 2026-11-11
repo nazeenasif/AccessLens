@@ -185,14 +185,19 @@ proxy logic are not accepted as the only barrier.
 
 - **Decision (per ADR-0001 §1 and §4)**:
   - **`scanner` container**: built from the official Playwright image
-    `mcr.microsoft.com/playwright:v1.64.1-noble`. Runtime settings:
-    - Chromium runs as the non-root `pwuser` with Playwright's `seccomp_profile.json`, so
-      Chromium's sandbox stays **enabled**;
+    `mcr.microsoft.com/playwright:v1.64.1-noble`, pinned by digest, with the image's Node and
+    package managers replaced by the exact Node 24.22.1 binary (ADR-0003 Addendum C). Runtime
+    settings:
+    - Chromium runs as the non-root `pwuser` with Playwright's `seccomp_profile.json` and is
+      launched with `chromiumSandbox: true`, so Chromium's sandbox stays **enabled** (Playwright
+      leaves it off otherwise);
     - `init: true`, and **no `--ipc=host`** (shared memory is raised through `shm_size`
       instead; a provisional value is set at M2 and the final value is measured at M3 against the
       benchmark fixtures);
     - `read_only: true` rootfs with a `tmpfs` for `/tmp`;
-    - `cap_drop: [ALL]`, `no-new-privileges`;
+    - `cap_drop: [ALL]`, `cap_add: [SYS_CHROOT]` (only this one; the seccomp profile allows
+      `chroot`, which the sandbox needs, only with it; `pwuser` holds it in no effective set; ADR-0001
+      Amendment 2), `no-new-privileges`;
     - limits of `mem_limit: 1.5g`, `cpus: 1.5`, `pids_limit: 512`;
     - no host volumes and **no published ports**;
     - networks `scan-ctl` and `scan-egress` only, both `internal: true`.
@@ -223,6 +228,12 @@ proxy logic are not accepted as the only barrier.
 
 - **Sandbox fallback**: `--no-sandbox` is never used with `SCAN_ENABLED=true`. If the sandbox
   can't start on a host, live scanning stays disabled there until a superseding ADR.
+- **Sandbox verification**: a launch alone isn't enough. The check launches with
+  `chromiumSandbox: true` under the real Compose service, renders a page, and confirms the
+  renderer is in a nested PID namespace and no process has a sandbox-disabling flag
+  (`tests/config/scanner-sandbox.test.ts`). The Docker Desktop (WSL2) result isn't production-host
+  evidence: Ubuntu 24.04 can restrict unprivileged user namespaces through AppArmor, so G1 repeats
+  the check on the actual host and records that state (T062, T066).
 - **Alternatives**: see ADR-0001 (the browser in the web process violates III; a microVM per scan
   is a future ADR).
 

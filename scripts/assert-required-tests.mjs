@@ -14,6 +14,14 @@ export const REQUIRED = [
   "images-nonroot.test.ts :: accesslens/web:local runs with a non-root UID",
   "images-nonroot.test.ts :: accesslens/scanner:local runs with a non-root UID",
   "images-nonroot.test.ts :: accesslens/egress-proxy:local runs with a non-root UID",
+  "images-nonroot.test.ts :: accesslens/web:local runs the pinned Node version",
+  "images-nonroot.test.ts :: accesslens/scanner:local runs the pinned Node version",
+  "images-nonroot.test.ts :: accesslens/egress-proxy:local runs the pinned Node version",
+  "images-nonroot.test.ts :: accesslens/scanner:local contains exactly one Node binary and no package managers",
+  "scanner-sandbox.test.ts :: Chromium launches with chromiumSandbox: true and renders a page",
+  "scanner-sandbox.test.ts :: the renderer runs inside the sandbox (nested PID namespace, seccomp filter)",
+  "scanner-sandbox.test.ts :: no Chromium process was started with a sandbox-disabling flag",
+  "scanner-sandbox.test.ts :: the scanner process is non-root with no effective capabilities; SYS_CHROOT is only in its bounding set",
   "diff-secret-scan.test.ts :: passes on a clean history, including .env.example placeholders",
   "diff-secret-scan.test.ts :: fails on a committed OpenRouter-style key",
   "diff-secret-scan.test.ts :: fails on a committed 48-byte base64 secret",
@@ -25,6 +33,7 @@ export const ALLOWED_SKIPS = [
   "web-binding.test.ts :: Docker daemon is required to run T019 — currently unavailable (test not executed)",
   "images-nonroot.test.ts :: Docker daemon is required for the built-image checks — currently unavailable (not executed)",
   "diff-secret-scan.test.ts :: gitleaks (on PATH or via Docker) is required to run T027 — currently unavailable",
+  "scanner-sandbox.test.ts :: Docker daemon is required for the sandbox check — currently unavailable (not executed)",
   "scan-enabled-default.test.ts :: web treats anything other than the exact string 'true' as disabled — added with T116 (/api/audits SCAN_ENABLED check)",
 ];
 

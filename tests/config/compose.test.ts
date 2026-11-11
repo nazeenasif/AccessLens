@@ -18,6 +18,7 @@ type Service = {
   shm_size?: string | number;
   ipc?: string;
   cap_drop?: string[];
+  cap_add?: string[];
   security_opt?: string[];
   user?: string;
   mem_limit?: string;
@@ -162,6 +163,7 @@ describe("docker-compose.yml (T014)", () => {
     expect(s.read_only).toBe(true);
     expect(tmpfsList(s)).toContain("/tmp");
     expect(s.cap_drop).toEqual(["ALL"]);
+    expect(s.cap_add).toEqual(["SYS_CHROOT"]); // ADR-0001 Amendment 2 (OD-13)
     expect(s.security_opt).toContain("no-new-privileges:true");
     expect(s.security_opt).toContain(SECCOMP);
     expect(s.volumes ?? []).toEqual([]);
@@ -183,6 +185,17 @@ describe("docker-compose.yml (T014)", () => {
     expect(s.read_only).toBe(true);
     expect(tmpfsList(s).sort()).toEqual(["/app/apps/web/.next/cache", "/tmp"]);
     expect(s.volumes ?? []).toEqual([]);
+  });
+
+  it("grants capabilities only to the scanner (ADR-0001 Amendment 2)", () => {
+    const withCaps = Object.entries(c.services)
+      .filter(([, s]) => (s.cap_add ?? []).length > 0)
+      .map(([name]) => name);
+    expect(withCaps).toEqual(["scanner"]);
+    for (const [name, s] of Object.entries(c.services)) {
+      expect(s.cap_drop, `${name} cap_drop`).toEqual(["ALL"]);
+      expect((s as { privileged?: boolean }).privileged ?? false, `${name} privileged`).toBe(false);
+    }
   });
 
   it("never uses env_file (would leak every .env value into every service)", () => {

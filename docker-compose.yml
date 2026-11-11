@@ -112,6 +112,9 @@ services:
     tmpfs:
       - /tmp
     cap_drop: [ALL]
+    # Only addition (ADR-0001 Amendment 2, OD-13): the seccomp profile allows chroot, which Chromium's
+    # sandbox needs, only with this capability. pwuser holds it in no effective set.
+    cap_add: [SYS_CHROOT]
     security_opt:
       - no-new-privileges:true
       - seccomp=./ops/seccomp/playwright-seccomp-profile.json

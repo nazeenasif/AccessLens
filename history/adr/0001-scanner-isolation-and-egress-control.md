@@ -6,7 +6,8 @@
 > These parts protect the same boundary and would change together.
 
 - **Amendments:** Amendment 1 to §3 (NL-2 firewall rule order and scoping) — Accepted
-  2026-10-23, resolves OD-12.
+  2026-10-23, resolves OD-12. Amendment 2 to §4 (`SYS_CHROOT` for the scanner) — Accepted
+  2026-11-08, resolves OD-13.
 - **Status:** Accepted (2026-10-22, by the project owner, after review revision 1). Resolves
   plan Open Decisions **OD-1** and **OD-5** and narrows **OD-2**. Acceptance approves the
   design only: **no security gate (G0/G1) has passed**; gates pass only with recorded execution
@@ -205,6 +206,64 @@ Accepted cluster:
    - Use `init: true`.
    - Retain R4 hardening: `cap_drop: [ALL]`, `no-new-privileges`, read-only rootfs with `tmpfs`
      `/tmp`, memory/CPU/PID limits, and a fresh context per audit.
+
+   > **Open issue OD-13 (2026-11-04; not decided).** This section requires both
+   > `cap_drop: [ALL]` and an enabled Chromium sandbox, and the two conflict. Measured 2026-11-04 on Docker Desktop (WSL2): with `cap_drop: [ALL]`, `chromium.launch({ chromiumSandbox: true })` exits with `Zygote process exited prematurely`, on both our image (Node 24.22.1) and the unmodified Playwright image (Node 26.13.0). Adding only `SYS_CHROOT` launches with the rest of the hardening intact; none of Docker's 13 other default capabilities does.
+   > Options are in the OD-13 row of the plan. The accepted text stays in force until the owner decides.
+
+   > **Amendment 2 to §4 — ACCEPTED (2026-11-08, by the project owner; resolves OD-13, Option A).**
+   > This amendment adds to §4 and to the note above. Their text is kept unchanged as the record;
+   > where they conflict, this amendment governs.
+   >
+   > **Decision.** The `scanner` service keeps `cap_drop: [ALL]` and adds only
+   > `cap_add: [SYS_CHROOT]`. `web`, `web-dev`, and `egress-proxy` get no capabilities. The scanner
+   > launches Chromium with Playwright's `chromiumSandbox: true`. `--no-sandbox` and
+   > `--disable-sandbox` remain forbidden. §4's fallback still applies: if the sandbox can't start
+   > on a host, live scanning stays disabled there.
+   >
+   > **Why it is necessary.**
+   > - Chromium's sandbox calls `chroot`.
+   > - `ops/seccomp/playwright-seccomp-profile.json` allows `chroot` only when the container has
+   >   `CAP_SYS_CHROOT`, so `cap_drop: [ALL]` also blocks that syscall. Chromium then exits with
+   >   `Zygote process exited prematurely`.
+   > - Of Docker's 14 default capabilities, tested one at a time, only `SYS_CHROOT` lets the sandbox
+   >   start under the full hardening.
+   >
+   > **The trade-off.**
+   > - *What it opens:* `chroot` is the only syscall in the profile tied to this capability, so
+   >   `chroot` is the only syscall the grant unlocks. It adds to the kernel surface already noted
+   >   under Consequences for user-namespace cloning.
+   > - *What limits it:* `pwuser` doesn't hold the capability. Its effective, permitted, inheritable,
+   >   and ambient sets are all empty; `SYS_CHROOT` is only in the bounding set. `no-new-privileges`
+   >   stops a setuid or file-capability binary from raising it.
+   > - *What remains:* a process running as root in the container would hold `SYS_CHROOT`. The
+   >   Dockerfile's `USER pwuser` and the non-root test guard against that.
+   > - *Not investigated:* Option B, keeping `cap_drop: [ALL]` by other means. A custom seccomp
+   >   profile might allow it, but that is untested and would mean maintaining a fork of Playwright's
+   >   profile.
+   >
+   > **Sandbox-on verification is mandatory.** A browser launch alone proves nothing, because
+   > Playwright launches without the sandbox unless asked. Any check of this control MUST:
+   > - launch with `chromiumSandbox: true` under the actual Compose service definition, and render a
+   >   page;
+   > - confirm the renderer is in a nested PID namespace. `Seccomp: 2` alone is not enough, because
+   >   an unsandboxed renderer also reports it, from the container's profile;
+   > - confirm no Chromium process carries a sandbox-disabling flag.
+   >
+   > `tests/config/scanner-sandbox.test.ts` does this and is required in CI. Removing the capability
+   > makes it fail.
+   >
+   > **Evidence and its limits.** Measured 2026-11-08 on Docker Desktop 29.9.2 on WSL2, with renderer
+   > `NSpid: 129 4 1` when sandboxed and `NSpid: 72` in an unsandboxed control. **This does not prove
+   > production-host compatibility.** Ubuntu 24.04 can restrict unprivileged user namespaces through
+   > AppArmor (`kernel.apparmor_restrict_unprivileged_userns`), so a sandbox that works here may not
+   > start there.
+   >
+   > **G1 requirement.** The §6 check "Chromium reports its sandbox as enabled" is met only by the
+   > checks above, run on the actual Ubuntu 24.04 G1 host (T062, T066), with that host's
+   > user-namespace and AppArmor state recorded in the evidence log. Any change to that host's
+   > AppArmor or sysctl settings is an owner decision. This amendment doesn't mean G1 has passed. G1
+   > passes only through task T066 with recorded evidence.
 
 5. **Hosting consequence (narrows OD-2)**:
    - Live scanning may only run on a host where the operator controls the Docker Engine and the

@@ -116,6 +116,8 @@ CI.
   - fixed `egress-proxy` IP on `scan-egress`;
   - scanner `init: true`, `shm_size` set, no `ipc: host`, `read_only`, `cap_drop: [ALL]`,
     `no-new-privileges`, seccomp profile path;
+  - *Added 2026-11-08 (OD-13, ADR-0001 Amendment 2)*: the scanner's `cap_add` is exactly
+    `[SYS_CHROOT]`; no other service has `cap_add`; every service keeps `cap_drop: [ALL]`;
   - per-service env allowlists match ADR-0001;
   - `web` has `read_only: true` with `tmpfs` only for `/tmp` and the Next.js runtime cache, and
     no volumes (ADR-0002 §6);
@@ -125,10 +127,11 @@ CI.
 - [X] T015 [P] Create `apps/web/Dockerfile` (multi-stage, pinned Node 24 slim tag, non-root
   runtime user, standalone output).
   - *Created and statically checked (pinned bases, non-root `USER`). Not yet built*: the build is verified by T024, which is pending Docker.
-  - *M0 review 2026-10-23*: base image aligned to **`node:24.22.1-bookworm-slim`**. That's the latest Node 24 LTS, a security release dated 2026-10-20, and identical to the Node bundled in the pinned Playwright image. Rebuilt; it runs v24.22.1 as UID 1000.
+  - *M0 review 2026-10-23*: base image aligned to **`node:24.22.1-bookworm-slim`**. That's the latest Node 24 LTS, a security release dated 2026-10-20. (Corrected 2026-11-04: the Playwright image's bundled Node isn't fixed; see T016.) Rebuilt; it runs v24.22.1 as UID 1000.
 - [X] T016 [P] Create `services/scanner/Dockerfile` (`FROM
   mcr.microsoft.com/playwright:v1.64.1-noble`, runtime `USER pwuser`).
   - *Created; not yet built (T024 pending Docker)*.
+  - *Fixed 2026-11-04 (CI `EBADENGINE`)*: upstream republished `v1.64.1-noble` with Node 26.13.0. Both bases are now pinned by digest: dependencies install on `node:24.22.1-bookworm-slim`, and the Playwright runtime has its own Node and package managers removed and the exact Node binary copied in (ADR-0003 Addendum C).
 - [X] T017 [P] Create `services/egress-proxy/Dockerfile` (multi-stage, pinned Node 24 slim tag,
   non-root runtime user, no browser).
   - *Created; not yet built (T024 pending Docker)*.
@@ -164,7 +167,8 @@ CI.
   hit) and its test `tests/config/check-secrets.test.ts`.
 - [X] T024 [P] Write the image-user test `tests/config/images-nonroot.test.ts`: builds each
   image and asserts its runtime UID ≠ 0 and base image tags are pinned (no `latest`).
-  - *Done 2026-10-23*: all three images built. **7/7 pass**: pinned tags (3), the build, and non-root UIDs (web `node`/1000, scanner `pwuser`/1001, egress-proxy `node`/1000). Node versions: web and egress-proxy v24.18.0; scanner v24.22.1 (bundled in the Playwright image).
+  - *Updated 2026-11-04 after a CI failure*: rebuilt with `--pull --no-cache`. Checks now also cover the exact Node version in every image, a single Node binary and no package managers in the scanner, and a real Chromium launch under the Compose hardening; later checks fail explicitly if the build failed, so they can't pass on stale images. **Results are local; the GitHub Actions re-run is pending.** The Chromium launch proves availability only; the sandbox is OD-13.
+  - *Updated 2026-11-08 (OD-13 resolved)*: the launch check moved to `tests/config/scanner-sandbox.test.ts`, which launches with `chromiumSandbox: true` under the real Compose scanner service, renders a page, and checks the renderer's nested PID namespace, the absence of sandbox-disabling flags, and the scanner's capability sets. Removing `SYS_CHROOT` makes it fail. **Local result only (Docker Desktop on WSL2), not production-host evidence**; see T062.
 - [X] T186 [P] Write the scanning-default guard test `tests/config/scan-enabled-default.test.ts`:
   - `.env.example` sets `SCAN_ENABLED=false`;
   - no service or profile in `docker-compose.yml` sets `SCAN_ENABLED` to anything but `false`,
@@ -188,7 +192,7 @@ CI.
   The scanner tool is chosen together with the T025 CI platform and recorded in the same
   ADR-0003 addendum. The pipeline runs with no live AI and no external sites.
   - *Created at `.github/workflows/ci.yml` (actions pinned by SHA). **Not executed***: the repository has no remote, so "CI green" is unverified.
-  - *M0 review 2026-10-23*: CI now runs every project once in **required mode** (`ACCESSLENS_REQUIRE_DOCKER=1`, `ACCESSLENS_REQUIRE_GITLEAKS=1`; a missing tool fails instead of skipping), followed by `npm run test:assert` (`scripts/assert-required-tests.mjs`, `if: always()`). The audit requires 10 named tool-backed tests to pass and allows only 4 allowlisted skips. Both behaviours are proven by `tests/config/ci-strictness.test.ts`. Verified locally in CI mode: 47 passed / 4 allowlisted skips / 0 failed; audit OK. **Still not executed on GitHub** (no remote).
+  - *M0 review 2026-10-23*: CI now runs every project once in **required mode** (`ACCESSLENS_REQUIRE_DOCKER=1`, `ACCESSLENS_REQUIRE_GITLEAKS=1`; a missing tool fails instead of skipping), followed by `npm run test:assert` (`scripts/assert-required-tests.mjs`, `if: always()`). The audit requires the named tool-backed tests to pass (18 as of 2026-11-08) and allows only 5 allowlisted skips. Both behaviours are proven by `tests/config/ci-strictness.test.ts`. Verified locally in CI mode: 47 passed / 4 allowlisted skips / 0 failed; audit OK. **Still not executed on GitHub** (no remote).
 - [X] T027 Write the diff secret-scan verification test `tests/config/diff-secret-scan.test.ts`:
   - it creates a temporary git repository with a commit containing a fake `sk-or-` key and a
     fake 48-byte base64 secret, and asserts `npm run check:secrets:diff` fails on it;
@@ -319,7 +323,9 @@ disabled throughout.
   - launch args include `--proxy-bypass-list=<-loopback>`,
     `--host-resolver-rules=MAP * ~NOTFOUND`, `--disable-quic`, and
     `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`;
-  - never `--no-sandbox`;
+  - never `--no-sandbox` or `--disable-sandbox`;
+  - the launch sets `chromiumSandbox: true` (ADR-0001 Amendment 2; Playwright leaves the sandbox
+    off otherwise);
   - one browser per concurrency slot;
   - recycle after 50 audits;
   - each context gets per-audit proxy credentials, `acceptDownloads: false`,
@@ -425,6 +431,13 @@ disabled throughout.
 - [ ] T062 [P] Write G1 test `tests/g1/dns-and-sandbox.test.ts`: external DNS resolution from
   inside `scanner` fails; Chromium reports its sandbox enabled; the `scanner` and `egress-proxy`
   environments contain no `OPENROUTER_*` or `EVIDENCE_SIGNING_*` variables.
+  - *OD-13 (ADR-0001 Amendment 2)*: "sandbox enabled" means, on the actual Ubuntu 24.04 G1 host and
+    under the production-config scanner service: launch with `chromiumSandbox: true` and render a
+    page; the renderer is in a nested PID namespace; no process has a sandbox-disabling flag. The
+    evidence log records the kernel version and `kernel.apparmor_restrict_unprivileged_userns`.
+    `tests/config/scanner-sandbox.test.ts` passing on WSL2 or in CI doesn't satisfy this. If the
+    host's restrictions stop the sandbox, keep `SCAN_ENABLED=false` and ask the owner; never add
+    `--no-sandbox`.
 - [ ] T063 [P] Write integration test `services/scanner/tests/integration/redirect-policy.test.ts`
   (test mode, allowlisted fixture server): a public-fixture → private redirect stops with
   `BLOCKED_REDIRECT`; more than 10 redirects → `TOO_MANY_REDIRECTS`.
@@ -1221,7 +1234,10 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
   `[X]`, evidence in research R13), which unblocks T006–T008. Also resolved: OD-12, the NL-2
   firewall rule order and scoping (ADR-0001 Amendment 1,
   Accepted 2026-10-23, task T185 `[X]`). It unblocks T057 and T184; T066 (G1) still requires
-  recorded passing evidence.
+  recorded passing evidence. Also resolved: OD-13, `cap_drop: [ALL]` vs. the Chromium sandbox →
+  scanner `cap_add: [SYS_CHROOT]` only (ADR-0001 Amendment 2, Accepted 2026-11-08). It unblocks
+  T055 and T062; T066 (G1) still requires recorded passing evidence, including Ubuntu 24.04
+  user-namespace compatibility on the actual host.
 
 - **IDs T184–T188 were added on 2026-10-23 without renumbering**, to keep existing task IDs
   stable. Each runs at the position where it appears in its phase, not in numeric order:

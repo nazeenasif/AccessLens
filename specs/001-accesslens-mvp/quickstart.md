@@ -133,8 +133,11 @@ on that host with its evidence log kept.
 - **Persistence**: Docker doesn't document whether `DOCKER-USER` rules survive restarts, so
   install them through a persistent mechanism and re-run `npm run test:g1` after every Docker
   daemon or host restart. The exact install script is written at M2.
-- **Sandbox**: the scanner runs Chromium as `pwuser` with Playwright's seccomp profile. If the
-  G1 sandbox check fails, keep `SCAN_ENABLED=false`.
+- **Sandbox**: the scanner runs Chromium as `pwuser` with Playwright's seccomp profile,
+  `chromiumSandbox: true`, and `cap_add: [SYS_CHROOT]` as its only capability (ADR-0001
+  Amendment 2). Ubuntu 24.04 can restrict unprivileged user namespaces through AppArmor, so a
+  pass on another host doesn't carry over. If the G1 sandbox check fails on the host, keep
+  `SCAN_ENABLED=false`; never fall back to `--no-sandbox`.
 - Put `web` behind a TLS-terminating reverse proxy and set `TRUSTED_PROXY_HOPS=1`. The reverse
   proxy choice is open (see ADR-0003).
 

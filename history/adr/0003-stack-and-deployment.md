@@ -11,6 +11,8 @@
     below).
   - B — OD-8a resolved 2026-10-23: CI on GitHub Actions; the diff secret scan uses gitleaks
     v8.30.1 (see Addendum B below).
+  - C — scanner base images pinned by digest, Node from the official image, 2026-11-04 (see
+    Addendum C below).
   - OD-2, OD-7, and OD-8b (where G1 runs) remain open.
 - **Date:** 2026-10-22
 - **Feature:** 001-accesslens-mvp
@@ -178,6 +180,20 @@
   one is added. "CI green" for the M0 checkpoint stays unverified until then.
 - **Still open**: **OD-8b**, where G1 runs (a Linux host with the firewall rules applied), stays
   open; it is task T047.
+
+### Addendum C — Scanner base images (2026-11-04, CI failure fix)
+
+- **Why**: Decision §6 pinned the scanner to the tag `v1.64.1-noble`, assuming a version tag was
+  stable. Upstream republished that tag (digest `47b510dd…` → `2f05f8a7…`), changing its bundled
+  Node from 24.22.1 to 26.13.0. CI pulled the new image and `npm ci` failed with `EBADENGINE`, while
+  local builds passed on a cached copy.
+- **Decision**: `services/scanner/Dockerfile` pins both bases by digest. Dependencies install on
+  `node:24.22.1-bookworm-slim`. The runtime stays the Playwright image, for its browsers and system
+  libraries, with its own Node and package managers removed and the exact Node 24.22.1 binary copied
+  in. The rest of Decision §6 is unchanged.
+- **Trade-off**: digests don't receive upstream OS updates, so they must be re-resolved deliberately.
+- **Not covered**: the `web` and `egress-proxy` images still use the exact-version tag
+  `node:24.22.1-bookworm-slim`, which fixes their Node version but can receive OS-layer rebuilds.
 
 ## References
 
