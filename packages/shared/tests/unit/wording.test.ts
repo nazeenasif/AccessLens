@@ -117,6 +117,12 @@ describe("findBannedClaims (FR-014, SC-006, Principle II)", () => {
     ["the AI labels", "AI-generated · Unverified suggestion"],
     ["'accessible' on its own", "Make the menu button accessible to keyboard users."],
     ["'certificate'", "The site's TLS certificate could not be verified."],
+    // Only the word boundaries keep these clean (a banned word sits inside a longer word).
+    ["'noncompliant'", "The plugin is noncompliant with its own style guide."],
+    ["'uncertified'", "An uncertified plugin was found."],
+    ["'1100% accessible'", "Load grew by 1100% accessible to more users."],
+    // Out of scope by decision (PHR 30): "surpasses"/"exceeds WCAG" aren't banned phrases.
+    ["'surpasses WCAG 2 AA'", "The contrast surpasses WCAG 2 AA thresholds."],
     [
       "verbatim axe text (shown unchanged, FR-010)",
       "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",

@@ -5,3 +5,4 @@ export * from "./schemas/events.ts";
 export * from "./schemas/evidence.ts";
 export * from "./schemas/explain.ts";
 export * from "./schemas/finding.ts";
+export * from "./wording.ts";

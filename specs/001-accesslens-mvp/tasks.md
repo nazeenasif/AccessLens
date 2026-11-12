@@ -244,8 +244,9 @@ disabled throughout.
     Explain code;
   - match `specs/001-accesslens-mvp/data-model.md` so that T029–T030 pass.
   - *Done 2026-11-12*: T029 + T030 pass (267 tests). Shared field schemas live in `primitives.ts`, so `finding.ts` and `evidence.ts` don't import each other. Scanner and web findings are separate discriminated unions on `kind`. The 6 000-character evidence node total is left to the evidence verifier, as the contract says.
-- [ ] T033 Implement `packages/shared/src/wording.ts` (limitations statement, partial-reason
+- [X] T033 Implement `packages/shared/src/wording.ts` (limitations statement, partial-reason
   explanations, banned-claims list and `findBannedClaims()`), making T031 pass.
+  - *Done 2026-11-12*: T031 passes (39 tests); unit project 306 passed. `findBannedClaims` lowercases, turns hyphens into spaces, and collapses whitespace before matching 7 word-bounded patterns. "meets WCAG" isn't banned, so verbatim axe text passes with no exemption. `PARTIAL_REASON_EXPLANATIONS` is a `Record<PartialReason, string>`, so a new reason fails typecheck (TS2741, demonstrated). Mutation check: each phrase, each normalisation step, and the word boundaries are caught (the boundary cases were added in the T033 review). No banned-claim hits in axe-core 4.14.0 rule text (210 help/description strings); the WCAG 2.2 sentence matches R2 (`target-size` is the only rule tagged `wcag22aa`/`wcag258`; no rule is tagged `wcag22a`).
 
 ### 2b. Milestone M1 — URL / destination policy (Gate G0)
 
