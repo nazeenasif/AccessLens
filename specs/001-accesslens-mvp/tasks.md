@@ -217,7 +217,7 @@ disabled throughout.
 
 ### 2a. Shared schemas and wording (used by every story)
 
-- [ ] T029 [P] Write schema tests in `packages/shared/tests/unit/schemas.test.ts` covering:
+- [X] T029 [P] Write schema tests in `packages/shared/tests/unit/schemas.test.ts` covering:
   - `Audit`: `partialReasons` non-empty iff `status="partial"`; summary counts equal recomputed
     findings;
   - `Finding`: non-null `impact` for violations; `evidence`/`evidenceSignature` present iff
@@ -226,20 +226,24 @@ disabled throughout.
   - `AffectedNode` length limits (501/1001);
   - `SignedEvidenceV1` field limits (≤ 5 nodes, selector ≤ 500, help ≤ 500,
     description ≤ 1000).
-- [ ] T030 [P] Write the OpenAPI conformance test `packages/shared/tests/unit/openapi-conformance.test.ts`.
+  - *Done 2026-11-12*: 70 tests, green against T032. The T032 review added cases for `completedAt` ≥ `startedAt`, the exact R2 tag set, and hosts-only `sampleHosts`; each fails when its rule is disabled.
+- [X] T030 [P] Write the OpenAPI conformance test `packages/shared/tests/unit/openapi-conformance.test.ts`.
   Using a JSON Schema 2020-12 validator, it checks that valid and invalid sample payloads produce
   the same verdict from the Zod schemas and from
   `specs/001-accesslens-mvp/contracts/public-api.openapi.yaml` components.
-- [ ] T031 [P] Write wording tests in `packages/shared/tests/unit/wording.test.ts`:
+  - *Done 2026-11-12*: Ajv 8.20.0 + ajv-formats 3.0.1 (exact-pinned devDependencies). 195 samples across all 11 components; Zod and the contract agree on every one. The contract was aligned with the data model along the way (now **1.4.1**): strict UTC date-times, second-precision `issuedAt`, case-sensitive HTTPS `helpUrl`, UUID v4 ids, the exact R2 tag set, hosts-only `sampleHosts`, and a 16-hex `ExplainResponse.findingId`.
+- [X] T031 [P] Write wording tests in `packages/shared/tests/unit/wording.test.ts`:
   - the limitations statement mentions automated coverage limits, manual testing with assistive
     technology, no conformance certification, and the WCAG 2.2 gap;
   - every `PartialReason` has an explanation;
   - `findBannedClaims()` flags "compliant", "fully accessible", "certified", and equivalents.
-- [ ] T032 Implement the Zod schemas in `packages/shared/src/schemas/`:
+  - *Written 2026-11-11 (39 tests); red until T033*: the suite fails only because `src/wording.ts` doesn't exist yet, so `npm test` and the `@accesslens/shared` typecheck stay red until T033.
+- [X] T032 Implement the Zod schemas in `packages/shared/src/schemas/`:
   - `audit.ts`, `finding.ts`, `evidence.ts`, `events.ts` (NDJSON `AuditEvent`), `explain.ts`;
   - `errors.ts`: the `ErrorCode` enum, including `DOM_TOO_LARGE`, `SCAN_DISABLED`, and every
     Explain code;
   - match `specs/001-accesslens-mvp/data-model.md` so that T029–T030 pass.
+  - *Done 2026-11-12*: T029 + T030 pass (267 tests). Shared field schemas live in `primitives.ts`, so `finding.ts` and `evidence.ts` don't import each other. Scanner and web findings are separate discriminated unions on `kind`. The 6 000-character evidence node total is left to the evidence verifier, as the contract says.
 - [ ] T033 Implement `packages/shared/src/wording.ts` (limitations statement, partial-reason
   explanations, banned-claims list and `findBannedClaims()`), making T031 pass.
 
