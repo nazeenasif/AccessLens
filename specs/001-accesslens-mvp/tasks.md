@@ -277,9 +277,10 @@ disabled throughout.
 - [X] T039 Implement `packages/shared/src/url-policy/resolve-and-check.ts` (injectable resolver,
   IPv4 `all: true`; any non-public → block), making T036 pass.
   - *Done 2026-11-13*: G0 suite 60/60. The real resolver is `dns.promises.resolve4`: IPv4 A records only, all addresses, no OS lookup. The host is resolved once, and the validated addresses are returned. Not-found and other DNS failures, or an empty answer, give `TARGET_UNREACHABLE`; any answer that isn't canonical public IPv4 gives `BLOCKED_DESTINATION`. An IP-literal host (IPv4 in any form, or IPv6) passed straight to `resolveAndCheck` is refused with detail `ip_literal` before any lookup (review, 2026-11-13; 13 G0 host cases). Mutation check: all caught. **G0 is not passed**: that is T040, which needs a green CI run recorded in gate-evidence.md.
-- [ ] T040 **Run Gate G0**: run `npm run test:security -- g0` and `npm run test:unit` in CI,
+- [X] T040 **Run Gate G0**: run `npm run test:security -- g0` and `npm run test:unit` in CI,
   then record the run in `specs/001-accesslens-mvp/gate-evidence.md` (commit, run link,
   result).
+  - *Done 2026-11-13*: **G0 passed.** CI run [43438828829](https://github.com/nazeenasif/AccessLens/actions/runs/43438828829) on `6bad306` (ubuntu-24.04) concluded `success`: G0 suite 74 tests, `test:assert` 92 required. Recorded in gate-evidence.md. **G1 is not passed; `SCAN_ENABLED` stays `false`.**
 
 **Checkpoint G0**: passed only if T040 recorded a green run.
 
