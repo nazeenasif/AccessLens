@@ -268,12 +268,15 @@ disabled throughout.
   - any non-public answer → `BLOCKED_DESTINATION`;
   - a mixed public + private answer is blocked;
   - an IPv6-only answer → `TARGET_UNREACHABLE` (IPv4-only egress per ADR-0001).
-- [ ] T037 Implement `packages/shared/src/url-policy/normalize.ts` and
+- [X] T037 Implement `packages/shared/src/url-policy/normalize.ts` and
   `packages/shared/src/url-policy/validate-url.ts` (T034 passes).
-- [ ] T038 Implement `packages/shared/src/url-policy/ip-classify.ts`, exporting the single
+  - *Done 2026-11-13*: T034 53/53. Covers the scheme rule, http:80 / https:443 only, credentials, IP-literal hosts (`BLOCKED_DESTINATION`, detail `ip_literal`), and the 2048 limit on raw and normalised input. Mutation check: every rule is caught. The raw-length check needed a case that shrinks when normalised (a 2049-character URL that is mostly a fragment); it was added in the review and fails when that check is disabled.
+- [X] T038 Implement `packages/shared/src/url-policy/ip-classify.ts`, exporting the single
   `NON_PUBLIC_IPV4_RANGES` list and `isPublicIPv4()` (T035 passes).
-- [ ] T039 Implement `packages/shared/src/url-policy/resolve-and-check.ts` (injectable resolver,
+  - *Done 2026-11-13*: T035 123/123. The 18 ranges come from ADR-0001 §3 with Amendment 3. Only canonical dotted-quad input is classified, and ipaddr.js is used for parsing only. Mutation check: removing any of the 18 ranges, or relaxing the canonical check, is caught.
+- [X] T039 Implement `packages/shared/src/url-policy/resolve-and-check.ts` (injectable resolver,
   IPv4 `all: true`; any non-public → block), making T036 pass.
+  - *Done 2026-11-13*: G0 suite 60/60. The real resolver is `dns.promises.resolve4`: IPv4 A records only, all addresses, no OS lookup. The host is resolved once, and the validated addresses are returned. Not-found and other DNS failures, or an empty answer, give `TARGET_UNREACHABLE`; any answer that isn't canonical public IPv4 gives `BLOCKED_DESTINATION`. An IP-literal host (IPv4 in any form, or IPv6) passed straight to `resolveAndCheck` is refused with detail `ip_literal` before any lookup (review, 2026-11-13; 13 G0 host cases). Mutation check: all caught. **G0 is not passed**: that is T040, which needs a green CI run recorded in gate-evidence.md.
 - [ ] T040 **Run Gate G0**: run `npm run test:security -- g0` and `npm run test:unit` in CI,
   then record the run in `specs/001-accesslens-mvp/gate-evidence.md` (commit, run link,
   result).

@@ -1,6 +1,7 @@
 // The published list of prohibited-destination cases for gate G0 (spec SC-003; task T036).
 // SC-003 requires 100% of these to be refused. They cover direct IP literals, alternate encodings,
-// DNS answers (through a stub resolver), and redirect targets. Each redirect hop gets the same
+// DNS answers (through a stub resolver), redirect targets, and IP-literal hosts passed straight to
+// resolveAndCheck (as a proxy connect target would be). Each redirect hop gets the same
 // check; the scanner reports a refused main-frame hop as BLOCKED_REDIRECT (research R3). There
 // are also allowed controls, so the suite can't pass by refusing everything.
 //
@@ -8,11 +9,8 @@
 // must stay free of runtime imports other than type-only ones.
 import type { ErrorCode } from "../../src/schemas/errors.ts";
 
-export type DestinationCase = {
-  kind: "direct" | "encoded" | "dns" | "redirect" | "allowed";
+type CaseCommon = {
   name: string;
-  /** The URL as submitted, or the redirect target for kind "redirect". */
-  url: string;
   /**
    * What the stub resolver returns for the host: its answers, or a lookup error code.
    * Final rule (2026-11-13): TARGET_UNREACHABLE only when the IPv4 lookup returns no addresses,
@@ -23,6 +21,18 @@ export type DestinationCase = {
   answers?: string[] | "ENOTFOUND" | "ENODATA";
   expected: ErrorCode | "allowed";
 };
+
+export type DestinationCase =
+  | (CaseCommon & {
+      kind: "direct" | "encoded" | "dns" | "redirect" | "allowed";
+      /** The URL as submitted, or the redirect target for kind "redirect". */
+      url: string;
+    })
+  | (CaseCommon & {
+      kind: "host";
+      /** A host passed straight to resolveAndCheck, skipping the URL policy (T039 review). */
+      host: string;
+    });
 
 const literal = (name: string, url: string): DestinationCase => ({
   kind: "direct",
@@ -48,6 +58,13 @@ const redirect = (
   expected: DestinationCase["expected"],
   answers?: DestinationCase["answers"],
 ): DestinationCase => ({ kind: "redirect", name, url, expected, ...(answers ? { answers } : {}) });
+
+const host = (name: string, hostname: string): DestinationCase => ({
+  kind: "host",
+  name,
+  host: hostname,
+  expected: "BLOCKED_DESTINATION",
+});
 
 export const DESTINATION_CASES: readonly DestinationCase[] = [
   // Direct IP literals: every IP-literal URL is refused (M1 decision Q2).
@@ -113,6 +130,21 @@ export const DESTINATION_CASES: readonly DestinationCase[] = [
   redirect("to a non-http scheme", "file:///etc/passwd", "UNSUPPORTED_SCHEME"),
   redirect("to a non-default port", "http://internal.example:8080/", "PORT_NOT_ALLOWED"),
   redirect("to a URL with credentials", "https://admin:x@example.com/", "CREDENTIALS_IN_URL"),
+  // IP-literal hosts passed straight to resolveAndCheck (T039 review, 2026-11-13): refused with
+  // detail ip_literal, without any DNS lookup.
+  host("IPv4 loopback", "127.0.0.1"),
+  host("RFC 1918", "10.0.0.1"),
+  host("cloud metadata", "169.254.169.254"),
+  host("public IPv4", "93.184.216.34"),
+  host("decimal loopback", "2130706433"),
+  host("hex loopback", "0x7f000001"),
+  host("octal loopback", "0177.0.0.1"),
+  host("short loopback", "127.1"),
+  host("IPv6 loopback", "::1"),
+  host("bracketed IPv6 loopback", "[::1]"),
+  host("IPv4-mapped IPv6", "::ffff:127.0.0.1"),
+  host("public IPv6", "2606:4700:4700::1111"),
+  host("bracketed public IPv6", "[2606:4700:4700::1111]"),
   // Allowed controls.
   {
     kind: "allowed",

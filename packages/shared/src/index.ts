@@ -6,3 +6,6 @@ export * from "./schemas/evidence.ts";
 export * from "./schemas/explain.ts";
 export * from "./schemas/finding.ts";
 export * from "./wording.ts";
+export * from "./url-policy/ip-classify.ts";
+export * from "./url-policy/resolve-and-check.ts";
+export * from "./url-policy/validate-url.ts";

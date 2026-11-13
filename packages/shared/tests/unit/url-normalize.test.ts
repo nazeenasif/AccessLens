@@ -60,6 +60,14 @@ describe("length (Q3: ≤ 2048 before parsing and after normalising → INVALID_
     expect(refusal(withPath("https://example.com/", MAX + 1))).toBe("INVALID_URL");
   });
 
+  it("rejects raw input over 2048 even when it normalises shorter", () => {
+    // Mostly a fragment: normalising strips it, leaving https://example.com/ (20 characters),
+    // so only the raw-length check can reject this input.
+    const input = withPath("https://example.com/#", MAX + 1);
+    expect(input).toHaveLength(MAX + 1);
+    expect(refusal(input)).toBe("INVALID_URL");
+  });
+
   it("rejects input that fits but grows past 2048 when normalised", () => {
     // 2048 characters without a scheme; adding "https://" makes it 2056.
     const input = withPath("example.com/", MAX);

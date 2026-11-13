@@ -13,10 +13,11 @@ import {
 // a dropped, renamed, or skipped G0 case fails CI. Titles come from the case list itself.
 const G0 = "g0-destination.test.ts";
 export const G0_REQUIRED = [
-  `${G0} :: covers direct, encoded, DNS-resolved and redirect-target cases, plus allowed controls`,
+  `${G0} :: covers direct, encoded, DNS-resolved, redirect-target and IP-literal host cases, plus allowed controls`,
   `${G0} :: every expected outcome is an existing ErrorCode or 'allowed'`,
   `${G0} :: case titles are unique`,
   `${G0} :: IP-literal URLs are refused before any DNS lookup`,
+  `${G0} :: IP-literal hosts are refused by resolveAndCheck with detail ip_literal, before any DNS lookup`,
   `${G0} :: an allowed host is resolved once, and the validated addresses are the ones returned`,
   `${G0} :: a single non-public answer blocks the host, whatever its position`,
   ...DESTINATION_CASES.map((c) => `${G0} :: ${caseTitle(c)}`),

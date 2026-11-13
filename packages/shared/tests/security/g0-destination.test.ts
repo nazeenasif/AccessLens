@@ -1,6 +1,7 @@
 // Gate G0 destination suite (task T036; spec SC-003, FR-002, FR-003; ADR-0001 §2 and §3 with
 // Amendment 3; research R3). Every case in destination-cases.ts goes through the URL policy, then
-// the DNS check with a stub resolver. Run in CI with `npm run test:security -- g0` (task T040).
+// the DNS check with a stub resolver; "host" cases go straight to the DNS check. Run in CI with
+// `npm run test:security -- g0` (task T040).
 //
 // Exports expected:
 //   T037 validate-url.ts:       validateUrl(input) → { ok: true; url } | { ok: false; code }
@@ -12,6 +13,9 @@
 //     Final rule (2026-11-13): TARGET_UNREACHABLE only when the lookup returns no addresses
 //     ([] or one of those rejections). Any returned string that isn't a canonical public IPv4
 //     address, including an all-IPv6 answer, is BLOCKED_DESTINATION.
+//     T039 review (2026-11-13): an IP-literal host (IPv4 in any form, or IPv6) is refused with
+//     { ok: false, code: "BLOCKED_DESTINATION", detail: { reason: "ip_literal" } } and the
+//     resolver is never called.
 import { describe, expect, it } from "vitest";
 import { ErrorCodeSchema } from "../../src/schemas/errors.ts";
 import { resolveAndCheck } from "../../src/url-policy/resolve-and-check.ts";
@@ -35,6 +39,10 @@ function stubResolver(answers: DestinationCase["answers"]) {
 }
 
 async function checkDestination(c: DestinationCase, resolve: Lookup) {
+  if (c.kind === "host") {
+    const result = await resolveAndCheck(c.host, resolve);
+    return result.ok ? "allowed" : result.code;
+  }
   const url = validateUrl(c.url);
   if (!url.ok) return url.code;
   const result = await resolveAndCheck(new URL(url.url).hostname, resolve);
@@ -42,9 +50,9 @@ async function checkDestination(c: DestinationCase, resolve: Lookup) {
 }
 
 describe("the published G0 case list (SC-003)", () => {
-  it("covers direct, encoded, DNS-resolved and redirect-target cases, plus allowed controls", () => {
+  it("covers direct, encoded, DNS-resolved, redirect-target and IP-literal host cases, plus allowed controls", () => {
     const kinds = new Set(DESTINATION_CASES.map((c) => c.kind));
-    expect([...kinds].sort()).toEqual(["allowed", "direct", "dns", "encoded", "redirect"]);
+    expect([...kinds].sort()).toEqual(["allowed", "direct", "dns", "encoded", "host", "redirect"]);
   });
 
   it("every expected outcome is an existing ErrorCode or 'allowed'", () => {
@@ -72,6 +80,18 @@ describe("G0: properties of the check", () => {
     for (const c of DESTINATION_CASES.filter((c) => c.kind === "direct" || c.kind === "encoded")) {
       const { resolve, calls } = stubResolver(undefined);
       expect(await checkDestination(c, resolve), caseTitle(c)).toBe("BLOCKED_DESTINATION");
+      expect(calls, caseTitle(c)).toEqual([]);
+    }
+  });
+
+  it("IP-literal hosts are refused by resolveAndCheck with detail ip_literal, before any DNS lookup", async () => {
+    for (const c of DESTINATION_CASES.filter((c) => c.kind === "host")) {
+      const { resolve, calls } = stubResolver(undefined);
+      expect(await resolveAndCheck(c.host, resolve), caseTitle(c)).toEqual({
+        ok: false,
+        code: "BLOCKED_DESTINATION",
+        detail: { reason: "ip_literal" },
+      });
       expect(calls, caseTitle(c)).toEqual([]);
     }
   });
