@@ -285,6 +285,11 @@ identifiers beyond the audit reference.
   *Note 2026-11-13:* since FR-001 was amended, IP-literal hosts (including the alternate
   encodings and IPv4-mapped IPv6 named here) are rejected by FR-001 before this check. FR-002
   applies to the addresses a host name resolves to.
+  *Note 2026-11-13 (test mode):* in test mode only (`ACCESSLENS_TEST_MODE`, never in
+  production; ADR-0001 Amendment 4), the only reachable destinations are allowlisted test-page
+  host names whose answers lie inside the fixture subnet `172.30.50.0/24`. Every other URL is
+  refused with `SCAN_DISABLED`. Production behaviour is unchanged, and SC-003 / gate G0 run
+  without test mode.
 - **FR-003**: System MUST apply the same destination check to every redirect hop and every
   resource the page attempts to load; prohibited page-level redirects end the audit with a
   specific message, and prohibited subresource requests are blocked and noted in the audit.

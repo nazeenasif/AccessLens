@@ -13,6 +13,8 @@
     v8.30.1 (see Addendum B below).
   - C — scanner base images pinned by digest, Node from the official image, 2026-11-04 (see
     Addendum C below).
+  - D — Test-mode Compose overlay `docker-compose.test.yml` (2026-11-13; see Addendum D below and
+    ADR-0001 Amendment 4).
   - OD-2, OD-7, and OD-8b (where G1 runs) remain open.
 - **Date:** 2026-10-22
 - **Feature:** 001-accesslens-mvp
@@ -194,6 +196,28 @@
 - **Trade-off**: digests don't receive upstream OS updates, so they must be re-resolved deliberately.
 - **Not covered**: the `web` and `egress-proxy` images still use the exact-version tag
   `node:24.22.1-bookworm-slim`, which fixes their Node version but can receive OS-layer rebuilds.
+
+### Addendum D — Test-mode Compose overlay (2026-11-13, owner decision)
+
+Test mode (ADR-0001 Amendment 4) lives in a separate overlay, `docker-compose.test.yml`, used as
+`docker compose -f docker-compose.yml -f docker-compose.test.yml …`. It is used only by local
+end-to-end runs and CI, never on a deployment host.
+
+- **Contents**:
+  - the `test-fixtures` network (`172.30.50.0/24`);
+  - the fixture server (T071) on that network;
+  - the mock OpenRouter (T150);
+  - `ACCESSLENS_TEST_MODE=true`, `ACCESSLENS_TEST_ALLOWLIST`, and
+    `ACCESSLENS_TEST_FIXTURE_SUBNET` for the services that read them;
+  - `NODE_ENV=test` for `scanner` and `egress-proxy`;
+  - `egress-proxy` attached to `test-fixtures`.
+- **Never in the overlay**: `SCAN_ENABLED=true`; published ports for `scanner` or `egress-proxy`;
+  attaching `scanner` to any non-internal network.
+- **The base `docker-compose.yml` stays production-shaped**: it mentions no `ACCESSLENS_TEST_*`
+  variable.
+- **Tests**: T195 (overlay config test, required in `test:assert`) and the T014/T186 extensions.
+  The mock OpenRouter moves from "a test profile in `docker-compose.yml`" (T150's original
+  wording) into this overlay.
 
 ## References
 

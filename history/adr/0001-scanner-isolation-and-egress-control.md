@@ -8,7 +8,8 @@
 - **Amendments:** Amendment 1 to §3 (NL-2 firewall rule order and scoping) — Accepted
   2026-10-23, resolves OD-12. Amendment 2 to §4 (`SYS_CHROOT` for the scanner) — Accepted
   2026-11-08, resolves OD-13. Amendment 3 to §3 (four more non-public IPv4 ranges; one range list
-  for proxy and firewall) — Accepted 2026-11-13.
+  for proxy and firewall) — Accepted 2026-11-13. Amendment 4 to §1, §2 and §6 (test mode,
+  separate from `SCAN_ENABLED`) — Accepted 2026-11-13.
 - **Status:** Accepted (2026-10-22, by the project owner, after review revision 1). Resolves
   plan Open Decisions **OD-1** and **OD-5** and narrows **OD-2**. Acceptance approves the
   design only: **no security gate (G0/G1) has passed**; gates pass only with recorded execution
@@ -315,6 +316,57 @@ Accepted cluster:
    - Chromium reports its sandbox as enabled.
    - **No gate counts as passed without recorded execution evidence** (CI run or deploy smoke-test
      log) from the actual composed stack and host firewall.
+
+   > **Amendment 4 to §1, §2 and §6 — ACCEPTED (2026-11-13, by the project owner; test mode).**
+   > This adds to §1 (topology and environment table), §2 (proxy behaviour), and §6 (G1). Their
+   > earlier text is kept unchanged; where they conflict, this amendment governs. Production
+   > behaviour doesn't change.
+   >
+   > **Problem.** `web` refuses every audit unless `SCAN_ENABLED` is exactly `true`, and nothing
+   > outside a deployment host may set it (T186, T187). Local and CI end-to-end tests still need
+   > real audits of test pages. R13's existing guard, an allowlist honoured only when
+   > `NODE_ENV=test`, can't protect `web`, because Next.js replaces `NODE_ENV` at build time.
+   >
+   > **Decision: test mode is a separate setting.**
+   >
+   > | Variable | Read by | Meaning |
+   > |---|---|---|
+   > | `ACCESSLENS_TEST_MODE` | web, scanner, egress-proxy | On only when exactly `true`; any other value, including unset or empty, is off. |
+   > | `ACCESSLENS_TEST_ALLOWLIST` | web, egress-proxy | Comma-separated exact host names of test pages. An IP address, wildcard, port, or empty entry is a startup error. Replaces R13's `EGRESS_TEST_ALLOWLIST`. |
+   > | `ACCESSLENS_TEST_FIXTURE_SUBNET` | web, egress-proxy | `172.30.50.0/24`: the only addresses an allowlisted host may resolve to. Checked on 2026-11-13: it overlaps none of `public` (172.30.10.0/24), `scan-ctl` (.20), `scan-egress` (.30), or `outbound` (.40), nor any Docker network on the development host. |
+   >
+   > **What test mode can reach.**
+   > - **`web`**: with `SCAN_ENABLED=true`, the production path. Otherwise, with test mode on, only
+   >   a URL whose host is exactly on the allowlist goes ahead, and every other URL gets
+   >   `SCAN_DISABLED`. The URL policy (FR-001, T037) still applies to allowed test URLs.
+   > - **DNS check** (`resolveAndCheck`): an optional test allowance. For an allowlisted host,
+   >   every answer must lie inside the fixture subnet; any other answer is
+   >   `BLOCKED_DESTINATION`. Without the allowance it behaves exactly as before, so G0 is
+   >   unaffected.
+   > - **`egress-proxy`**: in test mode it serves only allowlisted hosts resolving into the
+   >   fixture subnet, and refuses every other host, public ones included. A test-mode stack
+   >   therefore can't reach the internet.
+   > - **Topology**: a test-only network `test-fixtures` (`172.30.50.0/24`) exists only in
+   >   `docker-compose.test.yml` (ADR-0003 Addendum D). It attaches only the fixture server and
+   >   `egress-proxy`. `scanner` stays on internal networks only, so NL-1 is unchanged.
+   > - **`/api/health`** doesn't report test mode; the contract is unchanged.
+   >
+   > **Refused in production.** Each layer fails closed on its own:
+   > - every service exits non-zero at startup if `ACCESSLENS_TEST_MODE=true` and
+   >   `SCAN_ENABLED=true` are both set;
+   > - `scanner` and `egress-proxy` also require `NODE_ENV=test` for any `ACCESSLENS_TEST_*`
+   >   variable, as R13 already required for the allowlist;
+   > - `web` exits if the allowlist or fixture subnet is set without test mode;
+   > - T187 (`check-scan-enable.mjs`) refuses to approve a host whose environment has **any**
+   >   `ACCESSLENS_TEST_*` variable;
+   > - G1 (T062) asserts that no production-config container has any `ACCESSLENS_TEST_*`
+   >   variable.
+   >
+   > **`SCAN_ENABLED` rules unchanged.** No Compose file, including `docker-compose.test.yml`,
+   > may set `SCAN_ENABLED=true`. The T186 guard is extended to every `docker-compose*.yml`.
+   >
+   > *Validation*: tasks T189–T197 plus dated notes on the affected tasks. This amendment doesn't
+   > change any gate's status. G1 is not passed, and `SCAN_ENABLED` stays `false`.
 
 ## Consequences
 

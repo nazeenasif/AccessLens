@@ -23,6 +23,11 @@ The tasks blocked by each open decision are listed in **Notes**.
 confirmed **failing** before implementation. No test calls a live AI provider or a live
 third-party site. Scanner tests use local fixtures through the test-only allowlist
 (`EGRESS_TEST_ALLOWLIST`, honored only when `NODE_ENV=test`).
+*Note 2026-11-13:* test mode is now a separate setting (ADR-0001 Amendment 4).
+- **Variables**: `ACCESSLENS_TEST_MODE`, `ACCESSLENS_TEST_ALLOWLIST`, and
+  `ACCESSLENS_TEST_FIXTURE_SUBNET` (`172.30.50.0/24`); `EGRESS_TEST_ALLOWLIST` is renamed.
+- **Where it lives**: only in `docker-compose.test.yml` (ADR-0003 Addendum D).
+- **Scope**: it reaches only allowlisted test pages, and is refused in production.
 
 **Gates**: G0 (URL policy), G1 (network boundary, run on a firewall-equipped Linux host), G2
 (scanner fixtures and benchmark), and G3 (evidence tampering). A gate passes **only** when its
@@ -124,6 +129,7 @@ CI.
   - one replica each.
 
   Confirm it fails.
+  - *Note 2026-11-13 (test mode, ADR-0001 Amendment 4)*: extend with the proposal test 6 checks: the base `docker-compose.yml` mentions no `ACCESSLENS_TEST_*` variable. The overlay itself is checked by T195. **Add these checks to the `test:assert` required list when written.**
 - [X] T015 [P] Create `apps/web/Dockerfile` (multi-stage, pinned Node 24 slim tag, non-root
   runtime user, standalone output).
   - *Created and statically checked (pinned bases, non-root `USER`). Not yet built*: the build is verified by T024, which is pending Docker.
@@ -145,6 +151,7 @@ CI.
     until T093, read-only rootfs + `tmpfs /tmp`, resource limits);
   - `egress-proxy` with a fixed IP;
   - env allowlists per service.
+  - *Note 2026-11-13*: `docker-compose.yml` stays production-shaped. Test mode goes only in `docker-compose.test.yml` (T196, ADR-0003 Addendum D).
 - [X] T019 Write the `web` binding test in `tests/config/web-binding.test.ts`. On the composed
   stack it asserts that `web` accepts TCP on its `public` address and refuses TCP on its
   `scan-ctl` address. Confirm it fails.
@@ -181,6 +188,7 @@ CI.
 
   Runs in the `config` project.
   - *Done*: 4 passed, plus 1 skip reserved for T116 as specified. A mutation check (default flipped to `true`) made it fail.
+  - *Note 2026-11-13 (test mode, proposal test 6)*: extend the guard to **every** `docker-compose*.yml`, so no Compose file, including `docker-compose.test.yml`, may set `SCAN_ENABLED=true`. The existing rule stays intact. **Add the extended check to the `test:assert` required list when written.**
 - [X] T025 **Decision OD-8a (CI platform)**: choose the CI platform (the repository needs a
   remote) and record it as an addendum in `history/adr/0003-stack-and-deployment.md` and in the
   OD-8 row of `specs/001-accesslens-mvp/plan.md`. Where G1 runs is decided separately in T047.
@@ -250,17 +258,19 @@ disabled throughout.
 
 ### 2b. Milestone M1 — URL / destination policy (Gate G0)
 
-- [ ] T034 [P] Write normalization tests in `packages/shared/tests/unit/url-normalize.test.ts`:
+- [X] T034 [P] Write normalization tests in `packages/shared/tests/unit/url-normalize.test.ts`:
   - a missing scheme becomes `https://`; fragments are stripped; IDN becomes punycode;
   - length > 2048 → `INVALID_URL`;
   - non-http(s) → `UNSUPPORTED_SCHEME`;
   - `user:pass@` → `CREDENTIALS_IN_URL`;
   - ports other than 80/443 → `PORT_NOT_ALLOWED`.
-- [ ] T035 [P] Write IP classification tests in `packages/shared/tests/unit/ip-classify.test.ts`:
+  - *Done 2026-11-13*: written test-first (committed in `7b8ef93`) and passing at `6bad306`: 54 tests, including the review additions (IP-literal detail, http:80/https:443, scheme-less input, raw-length case).
+- [X] T035 [P] Write IP classification tests in `packages/shared/tests/unit/ip-classify.test.ts`:
   - every range in ADR-0001 §3, plus `::1`, `fc00::/7`, `fe80::/10`, and IPv4-mapped IPv6;
   - decimal, octal, and hex IPv4 encodings;
   - public examples are allowed.
-- [ ] T036 [P] Write the G0 destination case list in
+  - *Done 2026-11-13*: written test-first (`7b8ef93`) and passing at `6bad306`: 123 tests, including the ipaddr.js cross-check and canonical-dotted-quad cases (ADR-0001 Amendment 3).
+- [X] T036 [P] Write the G0 destination case list in
   `packages/shared/tests/security/destination-cases.ts` (the published SC-003 list: direct,
   encoded, DNS-resolved, and redirect-target cases) and the suite
   `packages/shared/tests/security/g0-destination.test.ts`. The suite uses a stub resolver and
@@ -268,15 +278,17 @@ disabled throughout.
   - any non-public answer → `BLOCKED_DESTINATION`;
   - a mixed public + private answer is blocked;
   - an IPv6-only answer → `TARGET_UNREACHABLE` (IPv4-only egress per ADR-0001).
+  - *Done 2026-11-13*: written test-first (`7b8ef93`) and passing at `6bad306`: 74 G0 tests (67 published cases plus 7 checks), all required by `test:assert`. Gate G0 recorded under T040.
 - [X] T037 Implement `packages/shared/src/url-policy/normalize.ts` and
   `packages/shared/src/url-policy/validate-url.ts` (T034 passes).
-  - *Done 2026-11-13*: T034 53/53. Covers the scheme rule, http:80 / https:443 only, credentials, IP-literal hosts (`BLOCKED_DESTINATION`, detail `ip_literal`), and the 2048 limit on raw and normalised input. Mutation check: every rule is caught. The raw-length check needed a case that shrinks when normalised (a 2049-character URL that is mostly a fragment); it was added in the review and fails when that check is disabled.
+  - *Done 2026-11-13*: T034 54/54. Covers the scheme rule, http:80 / https:443 only, credentials, IP-literal hosts (`BLOCKED_DESTINATION`, detail `ip_literal`), and the 2048 limit on raw and normalised input. Mutation check: every rule is caught. The raw-length check needed a case that shrinks when normalised (a 2049-character URL that is mostly a fragment); it was added in the review and fails when that check is disabled.
 - [X] T038 Implement `packages/shared/src/url-policy/ip-classify.ts`, exporting the single
   `NON_PUBLIC_IPV4_RANGES` list and `isPublicIPv4()` (T035 passes).
   - *Done 2026-11-13*: T035 123/123. The 18 ranges come from ADR-0001 §3 with Amendment 3. Only canonical dotted-quad input is classified, and ipaddr.js is used for parsing only. Mutation check: removing any of the 18 ranges, or relaxing the canonical check, is caught.
 - [X] T039 Implement `packages/shared/src/url-policy/resolve-and-check.ts` (injectable resolver,
   IPv4 `all: true`; any non-public → block), making T036 pass.
   - *Done 2026-11-13*: G0 suite 60/60. The real resolver is `dns.promises.resolve4`: IPv4 A records only, all addresses, no OS lookup. The host is resolved once, and the validated addresses are returned. Not-found and other DNS failures, or an empty answer, give `TARGET_UNREACHABLE`; any answer that isn't canonical public IPv4 gives `BLOCKED_DESTINATION`. An IP-literal host (IPv4 in any form, or IPv6) passed straight to `resolveAndCheck` is refused with detail `ip_literal` before any lookup (review, 2026-11-13; 13 G0 host cases). Mutation check: all caught. **G0 is not passed**: that is T040, which needs a green CI run recorded in gate-evidence.md.
+  - *Note 2026-11-13*: an optional test allowance will be added by T192 (test-first in T191). Without it, behaviour, and the G0 suite, are unchanged.
 - [X] T040 **Run Gate G0**: run `npm run test:security -- g0` and `npm run test:unit` in CI,
   then record the run in `specs/001-accesslens-mvp/gate-evidence.md` (commit, run link,
   result).
@@ -286,6 +298,23 @@ disabled throughout.
 
 ### 2c. Milestone M2 — Egress proxy and network isolation (Gate G1)
 
+- [ ] T189 [P] Write test-mode config tests in `packages/shared/tests/unit/test-mode-config.test.ts`
+  (ADR-0001 Amendment 4; proposal test 1):
+  - only the exact string `true` enables `ACCESSLENS_TEST_MODE`;
+  - `ACCESSLENS_TEST_ALLOWLIST` entries must be exact host names (an IP, wildcard, port, or
+    empty entry → config error);
+  - `ACCESSLENS_TEST_FIXTURE_SUBNET` must parse and must not overlap the four production subnets.
+- [ ] T190 Implement `packages/shared/src/test-mode.ts` (config parsing shared by web, scanner, and
+  egress-proxy), making T189 pass.
+- [ ] T191 [P] Write test-allowance tests in `packages/shared/tests/security/test-allowance.test.ts`
+  (proposal test 2):
+  - an allowlisted host resolving inside `172.30.50.0/24` → allowed;
+  - public, other private, or mixed answers → `BLOCKED_DESTINATION`;
+  - non-allowlisted hosts are unaffected;
+  - with no allowance, results are identical to the G0 suite.
+- [ ] T192 Add the optional test allowance to
+  `packages/shared/src/url-policy/resolve-and-check.ts`, making T191 pass. The G0 suite must stay
+  green and unchanged.
 - [ ] T041 [P] Write credential-registry tests in
   `services/egress-proxy/tests/unit/credentials.test.ts`: register/revoke; unknown or revoked →
   407; auto-expiry after `SCAN_TOTAL_TIMEOUT_MS`; per-audit byte and request counters.
@@ -301,9 +330,14 @@ disabled throughout.
   - **rebinding**: a stub resolver changes its answer after the first lookup, and the proxy
     still connects to the first validated IP;
   - request and byte caps → further requests refused and the cap flag set.
+  - *Note 2026-11-13 (test mode, proposal test 4)*: also cover:
+    - in test mode, a non-allowlisted **public** host is refused;
+    - an allowlisted host resolving outside `172.30.50.0/24` is refused;
+    - outside test mode, `ACCESSLENS_TEST_ALLOWLIST` is ignored.
 - [ ] T044 [P] Write startup safety tests in `services/egress-proxy/tests/security/startup.test.ts`
   and `services/scanner/tests/security/startup.test.ts`: the process exits non-zero if
   `EGRESS_TEST_ALLOWLIST` is set outside `NODE_ENV=test`, or if `PROXY_CONTROL_TOKEN` is missing.
+  - *Note 2026-11-13 (test mode, proposal test 3)*: the variable is renamed `ACCESSLENS_TEST_ALLOWLIST`. Also: exit non-zero when `ACCESSLENS_TEST_MODE=true` together with `SCAN_ENABLED=true`, and when any `ACCESSLENS_TEST_*` variable is set without `NODE_ENV=test`. **Add these startup-refusal tests to the `test:assert` required list when written** (the web half is T193).
 - [ ] T045 [P] Write the range-sync test `packages/shared/tests/unit/firewall-sync.test.ts`:
   `ops/firewall/nonpublic-ipv4.txt` equals `NON_PUBLIC_IPV4_RANGES` from T038.
 - [ ] T046 [P] Write proxy logging tests in `services/egress-proxy/tests/unit/logging.test.ts`:
@@ -324,8 +358,10 @@ disabled throughout.
   - test allowlist honored only in test mode.
 
   Makes T043 pass.
+  - *Note 2026-11-13*: the test allowlist is `ACCESSLENS_TEST_ALLOWLIST`. In test mode the proxy serves **only** allowlisted hosts resolving into `ACCESSLENS_TEST_FIXTURE_SUBNET`, using the T192 allowance. Every other host is refused (ADR-0001 Amendment 4).
 - [ ] T051 Implement `services/egress-proxy/src/main.ts` (config validation from T044, starts
   the proxy and control listeners on the `scan-egress` address).
+  - *Note 2026-11-13*: config validation uses `packages/shared/src/test-mode.ts` (T190) and applies the T044 startup refusals.
 - [ ] T052 Implement `services/egress-proxy/src/logger.ts` (pino with the R14 redaction set) and
   emit the R14 proxy events from `proxy.ts`/`credentials.ts`, making T046 pass.
 - [ ] T053 [P] Write browser-launch tests in `services/scanner/tests/unit/browser.test.ts`:
@@ -447,12 +483,14 @@ disabled throughout.
     `tests/config/scanner-sandbox.test.ts` passing on WSL2 or in CI doesn't satisfy this. If the
     host's restrictions stop the sandbox, keep `SCAN_ENABLED=false` and ask the owner; never add
     `--no-sandbox`.
+  - *Note 2026-11-13 (test mode, proposal test 8)*: also assert that no production-config container has any `ACCESSLENS_TEST_*` variable.
 - [ ] T063 [P] Write integration test `services/scanner/tests/integration/redirect-policy.test.ts`
   (test mode, allowlisted fixture server): a public-fixture → private redirect stops with
   `BLOCKED_REDIRECT`; more than 10 redirects → `TOO_MANY_REDIRECTS`.
 - [ ] T064 Add the `test:g1` runner `scripts/run-g1.mjs`: it brings up the production-config
   stack, checks that `verify-nl2.sh` passes, runs `tests/g1/*`, and writes a timestamped
   evidence log to `ops/evidence/g1-<host>-<date>.log`.
+  - *Note 2026-11-13*: the production-config stack is `docker-compose.yml` alone, never with `docker-compose.test.yml`.
 - [ ] T065 **Decision OD-10 (conditional)**: if T062's DNS check shows external resolution,
   choose a mitigation, implement it in `docker-compose.yml`, and add an addendum to
   `history/adr/0001-scanner-isolation-and-egress-control.md`. Otherwise mark OD-10 "not needed"
@@ -463,6 +501,7 @@ disabled throughout.
   Re-run after any daemon or host restart.
 
 **Checkpoint G1**: passed only if T066 recorded a green run on that host.
+*Note 2026-11-13*: the G1 run is a release gate, not a build blocker (see Dependencies, M3).
 
 ### 2d. Milestone M3 — Scanner service, fixtures only (Gate G2)
 
@@ -488,6 +527,18 @@ disabled throughout.
   - `shadow-root-large.html`.
 - [ ] T071 [P] Create the test-only fixture server `tests/support/fixture-server.ts`, serving
   `fixtures/` and the redirect/slow endpoints for T063 and T069.
+  - *Note 2026-11-13*: the fixture server runs on the `test-fixtures` network (`172.30.50.0/24`) in `docker-compose.test.yml` (T196), under a host name listed in `ACCESSLENS_TEST_ALLOWLIST`.
+- [ ] T195 [P] Write the overlay config test `tests/config/compose-test-overlay.test.ts`
+  (proposal test 6; ADR-0003 Addendum D):
+  - `docker-compose.test.yml` defines `test-fixtures` as `172.30.50.0/24`;
+  - only the fixture server and `egress-proxy` attach to it, and `scanner` keeps internal networks only;
+  - `scanner` and `egress-proxy` get `NODE_ENV=test`;
+  - no published ports for `scanner` or `egress-proxy`;
+  - no `SCAN_ENABLED` setting.
+  **Add this test to the `test:assert` required list when written.**
+- [ ] T196 Create `docker-compose.test.yml` per ADR-0003 Addendum D (fixture server from T071,
+  test-mode variables, `test-fixtures` network), making T195 pass. T150 later adds the mock
+  OpenRouter to this file.
 - [ ] T072 [P] Write mapping unit tests in `services/scanner/tests/unit/map-axe.test.ts`:
   - violations → `violation`; incomplete → `manual_review`;
   - category from `cat.*`; `isBestPractice` rule;
@@ -599,6 +650,7 @@ disabled throughout.
 - [ ] T084 [P] Create the benchmark fixtures in `fixtures/pages/benchmark/` (≈1k, 10k, 25k, and
   50k elements, contrast-heavy, multi-frame).
 - [ ] T085 Implement `services/scanner/src/config.ts` (T073).
+  - *Note 2026-11-13*: the scanner config reads `ACCESSLENS_TEST_MODE` through `test-mode.ts` (T190) and enforces the T044 refusals.
 - [ ] T086 Implement `services/scanner/src/map-axe.ts` (T072).
 - [ ] T087 Implement `services/scanner/src/dom-measure.ts` (TreeWalker per frame, early stop,
   2 s bound), making T074 pass.
@@ -690,8 +742,18 @@ and each violation carries sealed evidence.
   - complete, partial, and error results are relayed;
   - every violation carries valid `evidence` and `evidenceSignature`; manual-review findings
     carry none.
+  - *Note 2026-11-13 (test mode, proposal test 5)*: also cover, with `SCAN_ENABLED=false`:
+    - test mode with an allowlisted test page → `result`;
+    - test mode with any other URL → `SCAN_DISABLED`;
+    - neither setting → `SCAN_DISABLED`.
+- [ ] T193 [P] [US1] Write web startup safety tests in `apps/web/tests/security/startup.test.ts`
+  (proposal test 3, web half). The process exits non-zero when:
+  - `ACCESSLENS_TEST_MODE=true` and `SCAN_ENABLED=true` are both set;
+  - `ACCESSLENS_TEST_ALLOWLIST` or `ACCESSLENS_TEST_FIXTURE_SUBNET` is set without test mode.
+  **Add these tests to the `test:assert` required list when written.**
 - [ ] T101 [P] [US1] Health contract test in `apps/web/tests/integration/api-health.test.ts`:
   `{status, scanning, scanner, ai}`; `scanning: "disabled"` by default; no secrets or key ids.
+  - *Note 2026-11-13 (owner decision)*: `/api/health` does **not** report test mode; the contract is unchanged.
 - [ ] T102 [P] [US1] NDJSON reader tests in `apps/web/tests/unit/audit-stream.test.ts`: split
   lines across chunks; malformed lines; exactly one terminal event.
 - [ ] T103 [P] [US1] Local storage tests in `apps/web/tests/unit/storage.test.ts` (with
@@ -723,6 +785,7 @@ and each violation carries sealed evidence.
   - no files changed in the `web` container outside its `tmpfs` mounts;
   - `web` logs contain no snippet, evidence, or AI text;
   - `apps/web/package.json` contains no database or cache client dependencies (denylist check).
+  - *Note 2026-11-13*: "test mode" here means the `docker-compose.test.yml` overlay (ADR-0001 Amendment 4).
 - [ ] T107 [P] [US1] Security test in `apps/web/tests/security/headers.test.ts`: the CSP blocks
   inline scripts and external origins; no `dangerouslySetInnerHTML` in the build (lint
   assertion); `server-only` modules aren't in the client bundle.
@@ -730,8 +793,11 @@ and each violation carries sealed evidence.
   fixture server and the allowlist:
   - submit `f-20a`; see progress; see expected findings and evidence; the saved audit persists
     after reload;
-  - a private URL is refused; `/demo` stays reachable while scanning is disabled;
+  - a private URL is refused;
   - the partial (slow-load), page-too-large, and timeout fixtures show their states.
+  - *Changed 2026-11-13*: the "`/demo` stays reachable while scanning is disabled" assertion moved
+    to T176, because the demo page is only built in US3. Keeping it here would make US1 depend on US3.
+  - *Note 2026-11-13*: runs against `docker-compose.yml` plus `docker-compose.test.yml`. `SCAN_ENABLED` stays `false`; test mode enables the allowlisted test pages.
 - [ ] T109 [P] [US1] Self-audit and responsive E2E in `e2e/us1-a11y.spec.ts`: axe (WCAG A/AA)
   finds zero violations on the form, progress, dashboard, finding detail, and every state; the
   flow works keyboard-only; status changes are announced through `aria-live`; no horizontal
@@ -751,6 +817,8 @@ and each violation carries sealed evidence.
 - [ ] T115 [P] [US1] Implement `apps/web/src/server/scanner-client.ts` (POSTs `/scan` over
   `SCANNER_URL` with `X-Scanner-Token`, parses NDJSON, validates each event with the shared
   schema).
+- [ ] T194 [US1] Implement web startup config validation (using `test-mode.ts` from T190) so the
+  server refuses to start in the T193 cases, making T193 pass.
 - [ ] T116 [US1] Implement `apps/web/src/app/api/audits/route.ts` (Node runtime):
   - checks `SCAN_ENABLED` → `SCAN_DISABLED`;
   - applies the rate limit;
@@ -759,6 +827,10 @@ and each violation carries sealed evidence.
   - seals every violation with T111/T112 before relaying the `result`.
 
   Makes T100 pass.
+  - *Note 2026-11-13 (test mode)*: check order:
+    1. `SCAN_ENABLED=true` → production path;
+    2. otherwise, `ACCESSLENS_TEST_MODE=true` and the URL's host exactly on `ACCESSLENS_TEST_ALLOWLIST` → proceed with the T192 allowance;
+    3. anything else → `SCAN_DISABLED`.
 - [ ] T117 [P] [US1] Implement `apps/web/src/app/api/health/route.ts` (T101).
 - [ ] T118 [P] [US1] Implement `apps/web/src/lib/audit-stream.ts` (T102).
 - [ ] T119 [P] [US1] Implement `apps/web/src/lib/storage.ts`: IndexedDB `accesslens` v1 with
@@ -783,9 +855,13 @@ and each violation carries sealed evidence.
   and `apps/web/src/middleware.ts` (T107).
 - [ ] T126 [US1] Update `README.md` and `specs/001-accesslens-mvp/quickstart.md` with the
   verified US1 commands.
+  - *Note 2026-11-13*: the test-mode commands and renamed variables are covered by T197.
 
 ### Release prerequisites for User Story 1 (public scanning)
 
+- [ ] T197 [US1] Update `specs/001-accesslens-mvp/quickstart.md` and `README.md` for test mode: the
+  `docker compose -f docker-compose.yml -f docker-compose.test.yml` commands, and the renamed
+  variables (quickstart still names `EGRESS_TEST_ALLOWLIST`).
 - [ ] T127 [US1] **Decision OD-2 (VM/VPS provider and region)**: choose a provider that
   satisfies ADR-0001 §5 and record it in the ADR-0003 addendum and the OD-2 row of
   `specs/001-accesslens-mvp/plan.md`.
@@ -802,6 +878,7 @@ and each violation carries sealed evidence.
 
   Test cases: missing G1, a G1 row for a different host, a `fail` result, and a missing evidence
   file each fail; a complete record passes.
+  - *Note 2026-11-13 (test mode, proposal test 7)*: the script also refuses a host whose environment has **any** `ACCESSLENS_TEST_*` variable. **Add this test to the `test:assert` required list when written.**
 - [ ] T129 [US1] Deploy to the T127 host:
   - install `ops/firewall/accesslens-nl2.service`;
   - run `npm run test:g1` there and record G0 + G1 evidence for **that host** in
@@ -931,6 +1008,7 @@ there is a graceful unavailable state.
 - [ ] T141 [P] [US2] E2E test in `e2e/us2-explain.spec.ts`, against Compose with a mock
   OpenRouter in test mode: the Explain flow; an outage keeps the findings usable; an expired
   signature shows "Re-audit to enable explanations"; self-axe on the AI panel.
+  - *Note 2026-11-13*: runs against `docker-compose.yml` plus `docker-compose.test.yml`.
 
 ### Implementation for User Story 2
 
@@ -944,6 +1022,7 @@ there is a graceful unavailable state.
 - [ ] T145 [US2] Implement `apps/web/src/server/ai/openrouter.ts` (request shape, timeout via
   `AbortSignal`, error mapping, Zod re-validation), making T136 and T137 pass. The test-mode
   base-URL override is honored only when `NODE_ENV=test`.
+  - *Note 2026-11-13*: the base-URL override must follow `ACCESSLENS_TEST_MODE`, not `NODE_ENV=test`. Next.js inlines `NODE_ENV` at build time, so a `NODE_ENV` check can't work in `web` (ADR-0001 Amendment 4).
 - [ ] T146 [US2] Implement `apps/web/src/server/ai/daily-cap.ts` per the T130 decision, making
   T133 pass.
 - [ ] T147 [US2] Implement `apps/web/src/server/ai/audit-cap.ts` (in-memory per-`auditId`
@@ -967,6 +1046,7 @@ there is a graceful unavailable state.
   (T139, T140).
 - [ ] T150 [US2] Add a mock-OpenRouter service (test profile only) to `docker-compose.yml` for
   e2e, and update `specs/001-accesslens-mvp/quickstart.md` with the US2 commands.
+  - *Note 2026-11-13*: the mock OpenRouter goes in `docker-compose.test.yml` (ADR-0003 Addendum D), not in a profile of `docker-compose.yml`.
 - [ ] T151 [US2] **Run Gate G3**: run the T134 suite in CI and record it in
   `specs/001-accesslens-mvp/gate-evidence.md`.
 
@@ -1110,6 +1190,7 @@ keyboard-only. Every step renders sample data, the "Sample data" label stays vis
   sealed with a **throwaway random key generated at build time and never saved**, so the data
   satisfies the shared schema, while the server would refuse it with `EVIDENCE_INVALID` (unknown
   `kid`). Explain is disabled in the demo.
+  - *Note 2026-11-13*: "test mode" means the `docker-compose.test.yml` overlay (ADR-0001 Amendment 4).
 - [ ] T174 [US3] Create `apps/web/src/demo/data/annotations.json`, AI annotations for selected
   demo findings, **reviewed by a human for accuracy** before commit. Record the reviewer and date
   in `apps/web/src/demo/data/REVIEW.md`.
@@ -1118,6 +1199,9 @@ keyboard-only. Every step renders sample data, the "Sample data" label stays vis
 - [ ] T176 [US3] Implement `apps/web/src/app/demo/page.tsx`: loads the bundled demo data; renders
   the dashboard, `AiPanel` (read-only, no Explain requests), `ComparisonView`, and export of the
   sample report; shows the "Sample data" label; no network calls (T171).
+  - `/demo` stays reachable while scanning is disabled (`SCAN_ENABLED=false`); verified by the
+    T171 e2e test, which already runs with scanning and AI disabled.
+  - *Changed 2026-11-13*: this assertion moved here from T108 (US1), which can't check a page built in US3.
 
 **Checkpoint US3**: all five stories work independently.
 
@@ -1165,6 +1249,12 @@ keyboard-only. Every step renders sample data, the "Sample data" label stays vis
     T064/T066. T065 runs after T062 results. M2 uses a provisional `shm_size`. T185 (OD-12)
     is resolved (ADR-0001 Amendment 1 Accepted), so T057, T184, and T066 are unblocked by it;
     G1 is still **not passed**.
+  - *Note 2026-11-13 (owner decision)*: the **G1 run (T066) is a release gate, not a build
+    blocker**. M3 may start once M2's implementation tasks are done (T041–T046, T048–T057).
+    T063 needs M3's fixture server (T071), so it completes during M3. The G1 tests (T058–T062,
+    T184), the runner (T064), and the host steps (T047, T065, T066) can finish later. Nothing
+    changes for release: `SCAN_ENABLED=true` still requires recorded G0 **and** G1 evidence
+    from the deployment host itself (T129, checked by T187).
   - M3 (T067–T094) depends on M2 (the scanner runs through the proxy). T093 (final `shm_size`)
     needs the T084 fixtures and T090, and must finish before T094.
   - T188 (scanner contract conformance) is part of M3 and must pass for G2.
@@ -1248,6 +1338,9 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
   T055 and T062; T066 (G1) still requires recorded passing evidence, including Ubuntu 24.04
   user-namespace compatibility on the actual host.
 
+- **IDs T189–T197 were added on 2026-11-13 without renumbering** (test mode, ADR-0001 Amendment 4):
+  T189–T192 run before T041 (M2); T195–T196 run before T072 (M3, after the fixture server T071);
+  T193 runs before T101, T194 before T116, and T197 before T127 (US1).
 - **IDs T184–T188 were added on 2026-10-23 without renumbering**, to keep existing task IDs
   stable. Each runs at the position where it appears in its phase, not in numeric order:
   T186 after T024 (M0), T185 before T057 and T184 after T060 (M2), T188 after T082 (M3), and

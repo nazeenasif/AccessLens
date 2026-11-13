@@ -121,6 +121,9 @@ segmented networks. The rest of this section summarizes it; the ADR is authorita
 5. connects to the **validated IP itself**, never re-resolving, which defeats rebinding;
 6. reports per-audit cap breaches and blocked hosts to the scanner through a control endpoint
    authenticated with `PROXY_CONTROL_TOKEN` (R5).
+   *Note 2026-11-13:* in test mode only (ADR-0001 Amendment 4; never in production), the proxy
+   serves only `ACCESSLENS_TEST_ALLOWLIST` hosts whose answers lie in `172.30.50.0/24`, and
+   refuses every other host, public ones included.
 
 **Browser launch** (`scanner` container, defense in depth on top of NL-1):
 - the per-context `proxy: { server: "http://<egress-proxy fixed IP>:<port>", username,
@@ -542,6 +545,15 @@ trusts any client-supplied field it didn't sign.
     **test-only** allowlist (`EGRESS_TEST_ALLOWLIST`, honored by `egress-proxy` only when
     `NODE_ENV=test`). Both `egress-proxy` and `scanner` refuse to start outside test mode if it
     is set (security test).
+    *Note 2026-11-13:* superseded by ADR-0001 Amendment 4.
+    - **Names**: the allowlist is now `ACCESSLENS_TEST_ALLOWLIST`, alongside
+      `ACCESSLENS_TEST_MODE` and `ACCESSLENS_TEST_FIXTURE_SUBNET` (`172.30.50.0/24`).
+    - **Explicit setting**: test mode is now an explicit setting, because `web` can't rely on
+      `NODE_ENV` (Next.js inlines it at build time). `scanner` and `egress-proxy` still also
+      require `NODE_ENV=test`.
+    - **Where it lives**: only in `docker-compose.test.yml`.
+    - **Production checks**: production checks (T187, T062) assert that no `ACCESSLENS_TEST_*`
+      variable exists.
   - G1 runs with production configuration: no allowlist, firewall rules applied.
   - **Required suites**, mapped to the plan gates:
     - URL policy (G0);
