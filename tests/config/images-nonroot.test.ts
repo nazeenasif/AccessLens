@@ -55,6 +55,48 @@ describe("base images are pinned (T024, static)", () => {
     for (const img of imgs) expect(img, img).toMatch(SHA256);
   });
 
+  // Every Dockerfile in the repo (tracked or new), not just the ones listed above, so a Dockerfile
+  // added later can't slip through unpinned.
+  const allDockerfiles = sh("git", [
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    "--",
+    "*Dockerfile*",
+  ])
+    .stdout.split(/\r?\n/)
+    .filter((f) => /(^|\/)Dockerfile[^/]*$/.test(f));
+
+  it("finds every service Dockerfile", () => {
+    expect([...allDockerfiles].sort()).toEqual(expect.arrayContaining([...DOCKERFILES].sort()));
+  });
+
+  for (const df of allDockerfiles) {
+    it(`${df} pins every base image (each FROM and image ARG default) by @sha256 digest`, () => {
+      const text = readFileSync(df, "utf8");
+      const args = new Map(
+        [...text.matchAll(/^ARG\s+(\w+)(?:=(\S*))?/gim)].map((m) => [m[1]!, m[2] ?? ""]),
+      );
+      const stages = new Set(
+        [...text.matchAll(/^FROM\s+.*\s+AS\s+(\S+)/gim)].map((m) => m[1]!.toLowerCase()),
+      );
+      const unpinned: string[] = [];
+      for (const [name, value] of args) {
+        if (/IMAGE$/i.test(name) && !SHA256.test(value)) unpinned.push(`ARG ${name}=${value}`);
+      }
+      const froms = [...text.matchAll(/^FROM\s+(?:--\S+\s+)*(\S+)/gim)].map((m) => m[1]!);
+      expect(froms.length, `${df} has no FROM line`).toBeGreaterThan(0);
+      for (const from of froms) {
+        if (stages.has(from.toLowerCase())) continue; // an earlier build stage, not an image
+        const image = from.replace(/\$\{?(\w+)\}?/g, (_, k: string) => args.get(k) ?? "");
+        if (!SHA256.test(image)) unpinned.push(`FROM ${from} -> ${image || "(unresolved)"}`);
+      }
+      // Joined so a failure prints each unpinned line instead of a truncated array.
+      expect(unpinned.join("\n"), `${df}: unpinned base images`).toBe("");
+    });
+  }
+
   it("every service pins the same Node 24 version", () => {
     const version = pinnedNodeVersion();
     expect(version).toMatch(/^24\./);
