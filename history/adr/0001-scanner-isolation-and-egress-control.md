@@ -7,7 +7,8 @@
 
 - **Amendments:** Amendment 1 to §3 (NL-2 firewall rule order and scoping) — Accepted
   2026-10-23, resolves OD-12. Amendment 2 to §4 (`SYS_CHROOT` for the scanner) — Accepted
-  2026-11-08, resolves OD-13.
+  2026-11-08, resolves OD-13. Amendment 3 to §3 (four more non-public IPv4 ranges; one range list
+  for proxy and firewall) — Accepted 2026-11-13.
 - **Status:** Accepted (2026-10-22, by the project owner, after review revision 1). Resolves
   plan Open Decisions **OD-1** and **OD-5** and narrows **OD-2**. Acceptance approves the
   design only: **no security gate (G0/G1) has passed**; gates pass only with recorded execution
@@ -195,6 +196,35 @@ Accepted cluster:
    > host, including that unrelated connections survive install and flush. Accepting this
    > amendment doesn't mean G1 has passed. G1 passes only through task T066 with recorded
    > evidence.
+
+   > **Amendment 3 to §3 — ACCEPTED (2026-11-13, by the project owner; M1 review, before
+   > task T035).** This adds to §3's range list and to R3. Their earlier text is kept unchanged
+   > as the record; where they conflict, this amendment governs.
+   >
+   > **Finding.** §3 says its range list matches the proxy's non-public classification. With
+   > ipaddr.js 2.5.0 that wasn't true: `range()` reports four more IPv4 ranges as non-unicast,
+   > so the proxy would have blocked them while the firewall allowed them.
+   > - `192.88.99.0/24` (`reserved`: 6to4 relay anycast, RFC 7526);
+   > - `192.31.196.0/24` (`as112`, RFC 7535);
+   > - `192.175.48.0/24` (`as112`: direct delegation, RFC 7534);
+   > - `192.52.193.0/24` (`amt`, RFC 7450).
+   >
+   > **Decision.**
+   > - The four ranges above are added to the §3 list. NL-2 now drops 18 ranges, plus every
+   >   Docker bridge subnet on the host.
+   > - `NON_PUBLIC_IPV4_RANGES` (exported by `packages/shared/src/url-policy/ip-classify.ts`,
+   >   task T038) is the **single source of truth** for both the proxy's check and the firewall
+   >   rules. The firewall list is generated from it, and the T045 sync test keeps them equal.
+   > - ipaddr.js is used **for parsing only**. A non-public verdict comes from
+   >   `NON_PUBLIC_IPV4_RANGES`, not from `range()`. This supersedes R3 item 4's
+   >   "`range() !== "unicast"`".
+   > - A T035 cross-check test requires every non-unicast IPv4 range ipaddr.js knows about to
+   >   be covered by the list. A future ipaddr.js upgrade that adds a range therefore fails the
+   >   build until the list, and this ADR, are updated.
+   >
+   > *Validation*: the list is covered by T035 and the T036 G0 suite. The firewall side is
+   > covered by T045 and T057, and on the live stack by G1. Accepting this amendment doesn't
+   > mean G0 or G1 has passed.
 
 4. **Browser sandboxing (resolves OD-5)**:
    - Chromium runs as the non-root `pwuser` with Playwright's `seccomp_profile.json`, keeping

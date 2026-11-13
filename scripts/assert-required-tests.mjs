@@ -1,11 +1,29 @@
 #!/usr/bin/env node
-// CI guard (M0 review): fail unless every REQUIRED tool-backed test actually executed and passed,
+// CI guard (M0 review): fail unless every REQUIRED test (tool-backed, and gate G0) actually executed and passed,
 // and no test was skipped except the explicit allowlist below. A skipped test never counts as green.
 // Usage: node scripts/assert-required-tests.mjs <vitest-json-report>
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
+import {
+  DESTINATION_CASES,
+  caseTitle,
+} from "../packages/shared/tests/security/destination-cases.ts";
 
-// Docker- and gitleaks-backed tests that MUST run and pass in CI (file :: exact test title).
+// Gate G0 (M1 decision Q4): the suite's structural checks and one test per published case, so
+// a dropped, renamed, or skipped G0 case fails CI. Titles come from the case list itself.
+const G0 = "g0-destination.test.ts";
+export const G0_REQUIRED = [
+  `${G0} :: covers direct, encoded, DNS-resolved and redirect-target cases, plus allowed controls`,
+  `${G0} :: every expected outcome is an existing ErrorCode or 'allowed'`,
+  `${G0} :: case titles are unique`,
+  `${G0} :: IP-literal URLs are refused before any DNS lookup`,
+  `${G0} :: an allowed host is resolved once, and the validated addresses are the ones returned`,
+  `${G0} :: a single non-public answer blocks the host, whatever its position`,
+  ...DESTINATION_CASES.map((c) => `${G0} :: ${caseTitle(c)}`),
+];
+
+// Docker- and gitleaks-backed tests that MUST run and pass in CI (file :: exact test title),
+// plus the G0 suite.
 export const REQUIRED = [
   "web-binding.test.ts :: accepts TCP on the public address",
   "web-binding.test.ts :: refuses TCP on the scan-ctl address",
@@ -25,6 +43,7 @@ export const REQUIRED = [
   "diff-secret-scan.test.ts :: passes on a clean history, including .env.example placeholders",
   "diff-secret-scan.test.ts :: fails on a committed OpenRouter-style key",
   "diff-secret-scan.test.ts :: fails on a committed 48-byte base64 secret",
+  ...G0_REQUIRED,
 ];
 
 // The ONLY tests allowed to be skipped: inverse "tool unavailable" branches (skipped precisely

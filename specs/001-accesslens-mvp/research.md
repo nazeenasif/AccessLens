@@ -115,6 +115,9 @@ segmented networks. The rest of this section summarizes it; the ADR is authorita
 4. rejects the request if **any** resolved address is non-public, classified with `ipaddr.js`
    2.5 (`range() !== "unicast"`), using the same range list as the NL-2 firewall rules (a sync
    unit test enforces this);
+   *Note 2026-11-13:* superseded by [ADR-0001 Amendment 3](../../history/adr/0001-scanner-isolation-and-egress-control.md).
+   `NON_PUBLIC_IPV4_RANGES` is the single source of truth for the proxy and the firewall,
+   ipaddr.js parses only, and the list gained four ranges ipaddr.js treats as non-unicast;
 5. connects to the **validated IP itself**, never re-resolving, which defeats rebinding;
 6. reports per-audit cap breaches and blocked hosts to the scanner through a control endpoint
    authenticated with `PROXY_CONTROL_TOKEN` (R5).

@@ -39,6 +39,13 @@ demo for portfolio visitors.
 - Q: What export format(s) does the MVP support? → A: A downloadable, self-contained HTML report
   with print styles; PDF is produced by the browser's own print/"Save as PDF".
 
+### Session 2026-11-13
+
+- Q: Are URLs whose host is an IP address audited? → A: No. Any IP-literal host is rejected,
+  public or not: IPv4 in any encoding and every IPv6 address. Only host names are audited, and
+  their DNS answers are checked under FR-002. The error is `BLOCKED_DESTINATION` with detail
+  `{ reason: "ip_literal" }` (FR-001, amended).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Audit one public page and review findings (Priority: P1) 🎯 MVP
@@ -269,9 +276,15 @@ identifiers beyond the audit reference.
 
 - **FR-001**: System MUST accept a single absolute `http` or `https` URL per audit and reject all
   other schemes with a specific message.
+  *Amended 2026-11-13 (M1 review):* the URL's host MUST be a host name. URLs whose host is an IP
+  literal — IPv4 in any encoding, or any IPv6 address, public or not — MUST be rejected with
+  `BLOCKED_DESTINATION` and detail `{ reason: "ip_literal" }`.
 - **FR-002**: System MUST reject, before loading any content, URLs whose host is or resolves to a
   loopback, private, link-local, CGNAT, multicast, unspecified, or otherwise reserved address
   (IPv4 and IPv6, including alternate IP encodings and IPv4-mapped IPv6).
+  *Note 2026-11-13:* since FR-001 was amended, IP-literal hosts (including the alternate
+  encodings and IPv4-mapped IPv6 named here) are rejected by FR-001 before this check. FR-002
+  applies to the addresses a host name resolves to.
 - **FR-003**: System MUST apply the same destination check to every redirect hop and every
   resource the page attempts to load; prohibited page-level redirects end the audit with a
   specific message, and prohibited subresource requests are blocked and noted in the audit.
@@ -479,7 +492,15 @@ identifiers beyond the audit reference.
   engine version), which the limitations statement must reflect.
 - **Missing scheme**: input without a scheme is treated as `https://`; the user sees the
   normalized URL before the audit starts.
+  *Note 2026-11-13 (M1 review):* input containing `://` is parsed as written. Otherwise, a
+  leading `[a-zA-Z][a-zA-Z0-9+.-]*:` not followed by a digit is a scheme, and it is rejected
+  as unsupported (for example `javascript:alert(1)` or `user:pass@host`). Anything else gets
+  `https://` prefixed, so `example.com:8080` is a host with a port and `user:1234@host`
+  carries credentials. The length limit (2048 characters) applies to the raw input and to
+  the normalized URL.
 - **Ports**: only default web ports (80/443) are allowed in the MVP.
+  *Note 2026-11-13 (M1 review):* each scheme's own default only: `http` on 80 and `https` on
+  443. `http://host:443` and `https://host:80` are rejected like any other port.
 - **Identity for limits**: with no accounts, rate limits apply per client network address.
 - **Default limits**: set in plan research R12 (30 s page-load limit, 20 s analysis limit, 60 s
   total audit limit, 50,000 page elements, 10 redirects max, 5 audits per client per 10 minutes,
