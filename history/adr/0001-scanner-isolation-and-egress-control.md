@@ -367,6 +367,17 @@ Accepted cluster:
    >
    > *Validation*: tasks T189–T197 plus dated notes on the affected tasks. This amendment doesn't
    > change any gate's status. G1 is not passed, and `SCAN_ENABLED` stays `false`.
+   >
+   > *Note 2026-11-14 (owner decision, M2 test review)*:
+   > - **`SCAN_ENABLED` stays web-only.** §1's environment table and the T014 per-service
+   >   allowlists are unchanged, so in the Compose topology the variable never reaches `scanner` or
+   >   `egress-proxy`. Their refusal of test mode together with `SCAN_ENABLED=true` is kept as
+   >   protection against a stray variable (for example from a host environment).
+   > - **The scanner reads only `ACCESSLENS_TEST_MODE`**, through a mode-only check in
+   >   `test-mode.ts` with the same exact-`true` rule. It refuses to start if
+   >   `ACCESSLENS_TEST_ALLOWLIST` or `ACCESSLENS_TEST_FIXTURE_SUBNET` is set at all.
+   > - **Interface details** (control endpoint, proxy statuses, log events, firewall file) are in
+   >   `specs/001-accesslens-mvp/contracts/internal-egress-proxy.md`.
 
 ## Consequences
 

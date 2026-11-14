@@ -618,6 +618,9 @@ trusts any client-supplied field it didn't sign.
   - The `scanner` and `egress-proxy` environments are asserted in a test to contain no
     `OPENROUTER_*` or `EVIDENCE_SIGNING_*` variables. `PROXY_CONTROL_TOKEN` and
     `SCANNER_INTERNAL_TOKEN` are added to the redaction list.
+    *Note 2026-11-14:* `Proxy-Authorization` is redacted as well; it carries the per-audit proxy
+    credentials (T046). The egress-proxy's host hash is HMAC-SHA256 with a random per-process
+    key, not a plain digest (see `contracts/internal-egress-proxy.md`).
 - **Observability events (constitution Operational Constraints)**: every service uses pino with
   the same redaction set and emits these structured events, each tested to be emitted with no
   forbidden fields:

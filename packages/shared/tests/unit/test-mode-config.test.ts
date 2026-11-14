@@ -8,10 +8,12 @@
 //   parseTestModeConfig(env: Record<string, string | undefined>):
 //     | { enabled: false }
 //     | { enabled: true; allowlist: string[]; fixtureSubnet: string }
-//   Throws an Error whose message names the offending variable when test mode is on and the
+//   isTestModeEnabled(env: Record<string, string | undefined>): boolean  (review 2026-11-14)
+//     the mode-only check used by the scanner: same exact-"true" rule, reads nothing else.
+//   parseTestModeConfig throws an Error whose message names the offending variable when test mode is on and the
 //   allowlist or fixture subnet is missing or invalid.
 import { describe, expect, it } from "vitest";
-import { parseTestModeConfig } from "../../src/test-mode.ts";
+import { isTestModeEnabled, parseTestModeConfig } from "../../src/test-mode.ts";
 
 const MODE = "ACCESSLENS_TEST_MODE";
 const ALLOWLIST = "ACCESSLENS_TEST_ALLOWLIST";
@@ -176,5 +178,46 @@ describe("ACCESSLENS_TEST_FIXTURE_SUBNET: must parse and must not overlap produc
 
   it("rejects a missing subnet when test mode is on", () => {
     expect(() => parseTestModeConfig(without(VALID, SUBNET))).toThrow(SUBNET);
+  });
+});
+
+// Review 2026-11-14: the scanner reads only ACCESSLENS_TEST_MODE, so test-mode.ts also offers a
+// mode-only check with the same exact-"true" rule. It never reads or validates the allowlist or
+// subnet; refusing those in the scanner is a startup check (T044).
+describe("isTestModeEnabled: the mode-only check (scanner)", () => {
+  it("'true' enables it", () => {
+    expect(isTestModeEnabled({ [MODE]: "true" })).toBe(true);
+  });
+
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+    ["uppercase", "TRUE"],
+    ["title case", "True"],
+    ["1", "1"],
+    ["yes", "yes"],
+    ["on", "on"],
+    ["leading space", " true"],
+    ["trailing space", "true "],
+    ["false", "false"],
+  ])("%s → disabled", (_case, value) => {
+    expect(isTestModeEnabled({ [MODE]: value })).toBe(false);
+  });
+
+  it("doesn't need the allowlist or subnet", () => {
+    expect(isTestModeEnabled({ [MODE]: "true" })).toBe(true);
+    expect(() => isTestModeEnabled({ [MODE]: "true" })).not.toThrow();
+  });
+
+  it("doesn't validate the allowlist or subnet even when they are invalid", () => {
+    const env = { [MODE]: "true", [ALLOWLIST]: "127.0.0.1", [SUBNET]: "not-a-subnet" };
+    expect(isTestModeEnabled(env)).toBe(true);
+  });
+
+  it("agrees with parseTestModeConfig on whether test mode is on", () => {
+    for (const value of [undefined, "", "true", "TRUE", "1", "false"]) {
+      const env = { ...VALID, [MODE]: value };
+      expect(isTestModeEnabled(env), String(value)).toBe(parseTestModeConfig(env).enabled);
+    }
   });
 });

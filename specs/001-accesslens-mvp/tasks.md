@@ -305,9 +305,11 @@ disabled throughout.
     empty entry → config error);
   - `ACCESSLENS_TEST_FIXTURE_SUBNET` must parse and must not overlap the four production subnets.
   - *Done 2026-11-13*: written test-first (committed in `ec138cf`); 52 tests, including the canonical-entry cases from the review. Green with T190.
-- [X] T190 Implement `packages/shared/src/test-mode.ts` (config parsing shared by web, scanner, and
+  - *Review 2026-11-14*: added tests for the mode-only `isTestModeEnabled` (scanner). Red until T190 adds the export.
+- [ ] T190 Implement `packages/shared/src/test-mode.ts` (config parsing shared by web, scanner, and
   egress-proxy), making T189 pass.
   - *Done 2026-11-13*: `parseTestModeConfig`, exported from the package index. Only the exact `true` enables test mode. Allowlist entries must be canonical host names (lowercase ASCII labels, no trailing dot, nothing trimmed or lowercased) and not IP addresses. The subnet must be an IPv4 CIDR overlapping none of the four production subnets. Test mode on with either value missing is an error naming the variable. T189 52/52. Mutation check: 16/17 caught. A port entry is still rejected, but by the IP-literal check (colon), so its error message calls it an IP address (see PHR 44). *Review 2026-11-14*: a dedicated port rule now runs first: `name:digits` with exactly one colon → "includes a port; give the host name only". A new T189 case asserts the message names the port and not an IP address, and it fails with the port rule disabled. T189 53/53.
+  - *Reopened 2026-11-14*: add the mode-only `isTestModeEnabled(env)` (same exact-`true` rule; reads nothing else), making the new T189 cases pass. Unticked until then.
 - [X] T191 [P] Write test-allowance tests in `packages/shared/tests/security/test-allowance.test.ts`
   (proposal test 2):
   - an allowlisted host resolving inside `172.30.50.0/24` → allowed;
@@ -342,12 +344,14 @@ disabled throughout.
   and `services/scanner/tests/security/startup.test.ts`: the process exits non-zero if
   `EGRESS_TEST_ALLOWLIST` is set outside `NODE_ENV=test`, or if `PROXY_CONTROL_TOKEN` is missing.
   - *Note 2026-11-13 (test mode, proposal test 3)*: the variable is renamed `ACCESSLENS_TEST_ALLOWLIST`. Also: exit non-zero when `ACCESSLENS_TEST_MODE=true` together with `SCAN_ENABLED=true`, and when any `ACCESSLENS_TEST_*` variable is set without `NODE_ENV=test`. **Add these startup-refusal tests to the `test:assert` required list when written** (the web half is T193).
+  - *Note 2026-11-14 (owner decision)*: `SCAN_ENABLED` stays web-only (ADR-0001 §1, T014 unchanged). The scanner/proxy refusal of test mode with `SCAN_ENABLED=true` is kept as protection against a stray variable. The scanner reads only `ACCESSLENS_TEST_MODE` (`isTestModeEnabled`) and refuses whenever `ACCESSLENS_TEST_ALLOWLIST` or `ACCESSLENS_TEST_FIXTURE_SUBNET` is set. The cases are in `tests/support/startup-refusal-cases.ts`, and every one is required in `test:assert`.
 - [ ] T045 [P] Write the range-sync test `packages/shared/tests/unit/firewall-sync.test.ts`:
   `ops/firewall/nonpublic-ipv4.txt` equals `NON_PUBLIC_IPV4_RANGES` from T038.
 - [ ] T046 [P] Write proxy logging tests in `services/egress-proxy/tests/unit/logging.test.ts`:
   one `proxy.audit_summary` per audit (requests, bytes, blocked count, cap flags) and
   `proxy.blocked` (reason, hashed host). The serialized logs contain no URLs, paths, query
   strings, or tokens (research R14).
+  - *Note 2026-11-14*: `hostHash` must be HMAC-SHA256 with a random per-process key. The tests check that it isn't plain `sha256(host)` and stays stable within the process. `Proxy-Authorization` is redacted (R14 note). Contract: `contracts/internal-egress-proxy.md`.
 - [ ] T047 **Decision OD-8b (where G1 runs)**: choose and provision the Linux host or runner
   (Docker Engine plus iptables control) for G1, and record it in
   `specs/001-accesslens-mvp/plan.md` (the OD-8 row) and in the ADR-0003 addendum.
@@ -368,6 +372,11 @@ disabled throughout.
   - *Note 2026-11-13*: config validation uses `packages/shared/src/test-mode.ts` (T190) and applies the T044 startup refusals.
 - [ ] T052 Implement `services/egress-proxy/src/logger.ts` (pino with the R14 redaction set) and
   emit the R14 proxy events from `proxy.ts`/`credentials.ts`, making T046 pass.
+- [ ] T198 Implement the scanner startup refusal in `services/scanner/src/main.ts`, making the
+  seven scanner cases of T044 (`tests/support/startup-refusal-cases.ts`) pass. Uses
+  `isTestModeEnabled` from T190 and reads no other test-mode variable. Depends on T190.
+  - *Added 2026-11-14 (owner decision)*: split out of T085 so the required startup tests can go
+    green in M2. T085 keeps the rest of the scanner config and must keep these refusals.
 - [ ] T053 [P] Write browser-launch tests in `services/scanner/tests/unit/browser.test.ts`:
   - launch args include `--proxy-bypass-list=<-loopback>`,
     `--host-resolver-rules=MAP * ~NOTFOUND`, `--disable-quic`, and
@@ -655,6 +664,7 @@ disabled throughout.
   50k elements, contrast-heavy, multi-frame).
 - [ ] T085 Implement `services/scanner/src/config.ts` (T073).
   - *Note 2026-11-13*: the scanner config reads `ACCESSLENS_TEST_MODE` through `test-mode.ts` (T190) and enforces the T044 refusals.
+  - *Note 2026-11-14*: the scanner startup refusal is implemented early, as its own task T198 in M2. T085 builds on it and must not weaken it; the T044 scanner cases stay required.
 - [ ] T086 Implement `services/scanner/src/map-axe.ts` (T072).
 - [ ] T087 Implement `services/scanner/src/dom-measure.ts` (TreeWalker per frame, early stop,
   2 s bound), making T074 pass.
@@ -1345,6 +1355,8 @@ Polish follows. Each increment is demoable on its own, and none weakens a gate.
 - **IDs T189–T197 were added on 2026-11-13 without renumbering** (test mode, ADR-0001 Amendment 4):
   T189–T192 run before T041 (M2); T195–T196 run before T072 (M3, after the fixture server T071);
   T193 runs before T101, T194 before T116, and T197 before T127 (US1).
+- **ID T198 was added on 2026-11-14 without renumbering**: the scanner startup refusal, split out
+  of T085. It runs in M2 after T190 and T052.
 - **IDs T184–T188 were added on 2026-10-23 without renumbering**, to keep existing task IDs
   stable. Each runs at the position where it appears in its phase, not in numeric order:
   T186 after T024 (M0), T185 before T057 and T184 after T060 (M2), T188 after T082 (M3), and

@@ -8,6 +8,7 @@ import {
   DESTINATION_CASES,
   caseTitle,
 } from "../packages/shared/tests/security/destination-cases.ts";
+import { STARTUP_REFUSAL_CASES, startupTitle } from "../tests/support/startup-refusal-cases.ts";
 
 // Gate G0 (M1 decision Q4): the suite's structural checks and one test per published case, so
 // a dropped, renamed, or skipped G0 case fails CI. Titles come from the case list itself.
@@ -23,8 +24,14 @@ export const G0_REQUIRED = [
   ...DESTINATION_CASES.map((c) => `${G0} :: ${caseTitle(c)}`),
 ];
 
+// Startup refusals (task T044; ADR-0001 Amendment 4, proposal test 3): one test per case for
+// egress-proxy and for scanner. Both files are named startup.test.ts; the titles carry the service.
+export const STARTUP_REQUIRED = ["egress-proxy", "scanner"].flatMap((service) =>
+  STARTUP_REFUSAL_CASES[service].map((c) => `startup.test.ts :: ${startupTitle(service, c)}`),
+);
+
 // Docker- and gitleaks-backed tests that MUST run and pass in CI (file :: exact test title),
-// plus the G0 suite.
+// plus the G0 suite and the startup refusals.
 export const REQUIRED = [
   "web-binding.test.ts :: accepts TCP on the public address",
   "web-binding.test.ts :: refuses TCP on the scan-ctl address",
@@ -45,6 +52,7 @@ export const REQUIRED = [
   "diff-secret-scan.test.ts :: fails on a committed OpenRouter-style key",
   "diff-secret-scan.test.ts :: fails on a committed 48-byte base64 secret",
   ...G0_REQUIRED,
+  ...STARTUP_REQUIRED,
 ];
 
 // The ONLY tests allowed to be skipped: inverse "tool unavailable" branches (skipped precisely
