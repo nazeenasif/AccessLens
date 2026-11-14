@@ -9,3 +9,4 @@ export * from "./wording.ts";
 export * from "./url-policy/ip-classify.ts";
 export * from "./url-policy/resolve-and-check.ts";
 export * from "./url-policy/validate-url.ts";
+export * from "./test-mode.ts";

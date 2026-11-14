@@ -92,6 +92,20 @@ describe("ACCESSLENS_TEST_ALLOWLIST: entries must be exact host names", () => {
     expect(() => parseTestModeConfig({ ...VALID, [ALLOWLIST]: value })).toThrow(ALLOWLIST);
   });
 
+  // T190 review (2026-11-14): the error must name the port problem. A colon must not be
+  // misreported as an IP address.
+  it("rejects an entry with a port, naming the port problem", () => {
+    let message = "";
+    try {
+      parseTestModeConfig({ ...VALID, [ALLOWLIST]: "fixtures.test:8080" });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain(ALLOWLIST);
+    expect(message).toMatch(/\bport\b/);
+    expect(message).not.toMatch(/IP address/);
+  });
+
   it("rejects a missing allowlist when test mode is on", () => {
     expect(() => parseTestModeConfig(without(VALID, ALLOWLIST))).toThrow(ALLOWLIST);
   });

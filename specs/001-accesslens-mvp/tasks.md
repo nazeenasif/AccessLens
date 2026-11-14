@@ -298,23 +298,27 @@ disabled throughout.
 
 ### 2c. Milestone M2 — Egress proxy and network isolation (Gate G1)
 
-- [ ] T189 [P] Write test-mode config tests in `packages/shared/tests/unit/test-mode-config.test.ts`
+- [X] T189 [P] Write test-mode config tests in `packages/shared/tests/unit/test-mode-config.test.ts`
   (ADR-0001 Amendment 4; proposal test 1):
   - only the exact string `true` enables `ACCESSLENS_TEST_MODE`;
   - `ACCESSLENS_TEST_ALLOWLIST` entries must be exact host names (an IP, wildcard, port, or
     empty entry → config error);
   - `ACCESSLENS_TEST_FIXTURE_SUBNET` must parse and must not overlap the four production subnets.
-- [ ] T190 Implement `packages/shared/src/test-mode.ts` (config parsing shared by web, scanner, and
+  - *Done 2026-11-13*: written test-first (committed in `ec138cf`); 52 tests, including the canonical-entry cases from the review. Green with T190.
+- [X] T190 Implement `packages/shared/src/test-mode.ts` (config parsing shared by web, scanner, and
   egress-proxy), making T189 pass.
-- [ ] T191 [P] Write test-allowance tests in `packages/shared/tests/security/test-allowance.test.ts`
+  - *Done 2026-11-13*: `parseTestModeConfig`, exported from the package index. Only the exact `true` enables test mode. Allowlist entries must be canonical host names (lowercase ASCII labels, no trailing dot, nothing trimmed or lowercased) and not IP addresses. The subnet must be an IPv4 CIDR overlapping none of the four production subnets. Test mode on with either value missing is an error naming the variable. T189 52/52. Mutation check: 16/17 caught. A port entry is still rejected, but by the IP-literal check (colon), so its error message calls it an IP address (see PHR 44). *Review 2026-11-14*: a dedicated port rule now runs first: `name:digits` with exactly one colon → "includes a port; give the host name only". A new T189 case asserts the message names the port and not an IP address, and it fails with the port rule disabled. T189 53/53.
+- [X] T191 [P] Write test-allowance tests in `packages/shared/tests/security/test-allowance.test.ts`
   (proposal test 2):
   - an allowlisted host resolving inside `172.30.50.0/24` → allowed;
   - public, other private, or mixed answers → `BLOCKED_DESTINATION`;
   - non-allowlisted hosts are unaffected;
   - with no allowance, results are identical to the G0 suite.
-- [ ] T192 Add the optional test allowance to
+  - *Done 2026-11-13*: written test-first (`ec138cf`); 51 tests. Green with T192.
+- [X] T192 Add the optional test allowance to
   `packages/shared/src/url-policy/resolve-and-check.ts`, making T191 pass. The G0 suite must stay
   green and unchanged.
+  - *Done 2026-11-13*: optional third argument `allowance?: TestAllowance`. With no allowance the code path is unchanged. An allowlisted host, matched exactly, must have ALL answers as canonical IPv4 inside the fixture subnet; IP-literal hosts are still refused before DNS. `isIpLiteral` is now exported for T190. T191 51/51; G0 74/74. Mutation check: every allowance rule is caught, including a test allowance leaking into the no-allowance path.
 - [ ] T041 [P] Write credential-registry tests in
   `services/egress-proxy/tests/unit/credentials.test.ts`: register/revoke; unknown or revoked →
   407; auto-expiry after `SCAN_TOTAL_TIMEOUT_MS`; per-audit byte and request counters.
