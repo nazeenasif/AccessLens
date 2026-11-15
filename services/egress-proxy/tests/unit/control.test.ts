@@ -81,9 +81,13 @@ describe("PROXY_CONTROL_TOKEN", () => {
     expect(res.status).toBe(201);
   });
 
-  it("the token is compared in constant time (crypto.timingSafeEqual)", () => {
+  // Review 2026-11-15: the comparison goes through the shared constant-time helper. Its direct
+  // tests and the full source checks (both callers; no ===, !==, or .equals( on secrets) are in
+  // secret-compare.test.ts.
+  it("the token is compared in constant time (secretEquals)", () => {
     const source = readFileSync(new URL("../../src/control.ts", import.meta.url), "utf8");
-    expect(source).toContain("timingSafeEqual");
+    expect(source).toContain('import { secretEquals } from "./secret-compare.ts";');
+    expect(source).toMatch(/secretEquals\(token, req\.headers\[TOKEN_HEADER\]\)/);
   });
 });
 

@@ -12,6 +12,7 @@
 //   proxy.audit_summary  { event, auditId, requests, bytes, blocked, capped: { requests, bytes } }
 //     exactly once per audit, when it is revoked or expires (sweep);
 //   proxy.blocked        { event, auditId, reason, hostHash }  on registry.recordBlocked.
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { CredentialRegistry } from "../../src/credentials.ts";
@@ -127,6 +128,27 @@ describe("proxy.blocked: reason and hashed host", () => {
       expect(plain.startsWith(hashed)).toBe(false);
     }
   });
+
+  // Review 2026-11-15: the key is random per process, so another process hashes the same host
+  // differently (a fixed key would make them equal).
+  it("hostHash differs between two separate processes for the same host", () => {
+    const logger = new URL("../../src/logger.ts", import.meta.url).href;
+    const script = `import { hostHash } from ${JSON.stringify(logger)}; console.log(hostHash("internal.example"));`;
+    const run = () => {
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+        encoding: "utf8",
+        timeout: 15_000,
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    const first = run();
+    const second = run();
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).toMatch(/^[0-9a-f]{64}$/);
+    expect(first).not.toBe(second);
+    expect(hostHash("internal.example")).not.toBe(first);
+  }, 40_000); // two process spawns, each allowed 15 s
 
   it("hostHash stays stable within the process", () => {
     const first = hostHash("internal.example");

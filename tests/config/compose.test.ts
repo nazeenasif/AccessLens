@@ -84,6 +84,8 @@ const ALLOWED_ENV: Record<string, readonly string[]> = {
     "PROXY_CONTROL_TOKEN",
     "SCAN_MAX_BYTES",
     "SCAN_MAX_REQUESTS",
+    // 2026-11-14: the proxy's credential expiry (T048/T051) is the scanner's total audit timeout.
+    "SCAN_TOTAL_TIMEOUT_MS",
   ],
 };
 const FORBIDDEN_IN_SCAN_PATH = /^(OPENROUTER_|EVIDENCE_SIGNING_|AI_)/;
@@ -215,6 +217,18 @@ describe("docker-compose.yml (T014)", () => {
       expect(bad, `${name} must not receive AI/signing secrets`).toEqual([]);
     }
     expect(envKeys(svc("web"))).not.toContain("PROXY_CONTROL_TOKEN");
+  });
+
+  // 2026-11-14 (ADR-0001 environment table note): egress-proxy expires per-audit credentials after
+  // SCAN_TOTAL_TIMEOUT_MS, so it must read the same .env value as the scanner, never a copy.
+  it("egress-proxy and scanner take SCAN_TOTAL_TIMEOUT_MS from the same .env value", () => {
+    const value = (name: string) => {
+      const env = svc(name).environment;
+      return env !== undefined && !Array.isArray(env) ? env.SCAN_TOTAL_TIMEOUT_MS : undefined;
+    };
+    expect(value("egress-proxy"), "egress-proxy SCAN_TOTAL_TIMEOUT_MS").toBeDefined();
+    expect(value("egress-proxy")).toBe(value("scanner"));
+    expect(String(value("scanner"))).toMatch(/^\$\{SCAN_TOTAL_TIMEOUT_MS[:}]/);
   });
 
   it("runs exactly one replica of each service", () => {

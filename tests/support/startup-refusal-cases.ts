@@ -11,6 +11,7 @@
 //   together with SCAN_ENABLED=true is kept as protection against a stray variable.
 // - The scanner reads only ACCESSLENS_TEST_MODE, through the mode-only check in test-mode.ts. It
 //   refuses to start if ACCESSLENS_TEST_ALLOWLIST or ACCESSLENS_TEST_FIXTURE_SUBNET is set at all.
+// Review 2026-11-15: egress-proxy also refuses a PROXY_CONTROL_TOKEN under 32 characters.
 
 export type Service = "egress-proxy" | "scanner";
 export type StartupCase = { name: string; env: Record<string, string>; mentions: string[] };
@@ -42,6 +43,12 @@ export const STARTUP_REFUSAL_CASES: Record<Service, StartupCase[]> = {
     {
       name: "PROXY_CONTROL_TOKEN is missing",
       env: withoutToken("egress-proxy"),
+      mentions: ["PROXY_CONTROL_TOKEN"],
+    },
+    {
+      // Review 2026-11-15: ADR-0001 §1 requires at least 32 random bytes.
+      name: "PROXY_CONTROL_TOKEN is shorter than 32 characters",
+      env: { ...proxy, PROXY_CONTROL_TOKEN: "t".repeat(31) },
       mentions: ["PROXY_CONTROL_TOKEN"],
     },
     {

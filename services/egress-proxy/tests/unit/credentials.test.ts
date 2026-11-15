@@ -67,6 +67,11 @@ describe("unknown, wrong, or malformed credentials → 407", () => {
     ["a wrong password", basic(A.username, "wrong")],
     ["another audit's password", basic(A.username, B.password)],
     ["a scheme other than Basic", `Bearer ${A.password}`],
+    // Review 2026-11-15: correct credentials, encoded as for Basic, under another scheme.
+    [
+      "valid credentials under a non-Basic scheme",
+      basic(A.username, A.password).replace(/^Basic/, "Digest"),
+    ],
     ["undecodable base64", "Basic %%%"],
     ["no colon in the decoded value", `Basic ${Buffer.from(A.username).toString("base64")}`],
   ])("%s", (_case, header) => {

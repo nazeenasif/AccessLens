@@ -18,12 +18,13 @@
 // No test reaches the internet. `connect` is stubbed to record the validated address and port, then
 // open a socket to a local test server instead.
 import { once } from "node:events";
-import { createServer, request, type Server } from "node:http";
+import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
 import {
   connect as tcpConnect,
   createServer as createTcpServer,
   type AddressInfo,
   type Server as TcpServer,
+  type Socket,
 } from "node:net";
 import { parseTestModeConfig } from "@accesslens/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -56,8 +57,16 @@ const listen = async <S extends Server | TcpServer>(server: S): Promise<number> 
 
 let httpTargetPort = 0;
 let tcpEchoPort = 0;
+/** The headers of every request the local HTTP target received (review 2026-11-15). */
+let upstreamHeaders: IncomingHttpHeaders[] = [];
 beforeEach(async () => {
-  httpTargetPort = await listen(createServer((_req, res) => res.end(BODY)));
+  upstreamHeaders = [];
+  httpTargetPort = await listen(
+    createServer((req, res) => {
+      upstreamHeaders.push(req.headers);
+      res.end(BODY);
+    }),
+  );
   tcpEchoPort = await listen(createTcpServer((socket) => socket.pipe(socket)));
 });
 
@@ -68,7 +77,8 @@ async function startProxy(options: {
   testMode?: ReturnType<typeof parseTestModeConfig>;
   caps?: { maxRequests: number; maxBytes: number };
 }) {
-  const registry = new CredentialRegistry({ ttlMs: 60_000 });
+  let now = 1_000_000;
+  const registry = new CredentialRegistry({ ttlMs: 60_000, now: () => now });
   registry.register("audit-a", CREDS);
   const lookups: string[] = [];
   const connections: { address: string; port: number }[] = [];
@@ -93,18 +103,83 @@ async function startProxy(options: {
     connect,
   });
   const port = await listen(proxy);
-  return { port, registry, lookups, connections };
+  return {
+    port,
+    registry,
+    lookups,
+    connections,
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
+}
+
+/** Opens a CONNECT tunnel to the local echo server through the proxy (review 2026-11-15). */
+function openTunnel(proxyPort: number, target = "example.com:443") {
+  return new Promise<Socket>((resolve, reject) => {
+    const req = request({
+      host: "127.0.0.1",
+      port: proxyPort,
+      method: "CONNECT",
+      path: target,
+      headers: { "Proxy-Authorization": AUTH },
+    });
+    req.on("connect", (res, socket) => {
+      if (res.statusCode === 200) resolve(socket);
+      else reject(new Error(`tunnel refused: ${res.statusCode}`));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/** Sends `data` through the tunnel and resolves with the echo once it has fully arrived. */
+function echo(socket: Socket, data: string) {
+  return new Promise<string>((resolve) => {
+    let received = "";
+    const onData = (chunk: Buffer) => {
+      received += chunk.toString();
+      if (received.length >= data.length) {
+        socket.off("data", onData);
+        resolve(received);
+      }
+    };
+    socket.on("data", onData);
+    socket.write(data);
+  });
+}
+
+/**
+ * Writes `data` and resolves once the proxy closes the tunnel, with whatever still came back.
+ * Resolves `closed: false` if the tunnel is still open after 2 s.
+ */
+function writeExpectingCut(socket: Socket, data: string) {
+  return new Promise<{ closed: boolean; received: string }>((resolve) => {
+    let received = "";
+    socket.on("data", (chunk: Buffer) => (received += chunk.toString()));
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve({ closed: false, received });
+    }, 2_000);
+    socket.once("close", () => {
+      clearTimeout(timer);
+      resolve({ closed: true, received });
+    });
+    socket.on("error", () => undefined);
+    socket.write(data);
+  });
 }
 
 /** A CONNECT request through the proxy; resolves with the response status. */
-function connectVia(proxyPort: number, target: string, auth: string | undefined = AUTH) {
+// `null` means "send no Proxy-Authorization header". (`undefined` would trigger the default.)
+function connectVia(proxyPort: number, target: string, auth: string | null = AUTH) {
   return new Promise<{ status: number; echo?: string }>((resolve, reject) => {
     const req = request({
       host: "127.0.0.1",
       port: proxyPort,
       method: "CONNECT",
       path: target,
-      headers: auth === undefined ? {} : { "Proxy-Authorization": auth },
+      headers: auth === null ? {} : { "Proxy-Authorization": auth },
     });
     req.on("connect", (res, socket) => {
       if (res.statusCode !== 200) {
@@ -128,7 +203,7 @@ function connectVia(proxyPort: number, target: string, auth: string | undefined 
 }
 
 /** A plain-HTTP request through the proxy (absolute URL); resolves with status and body. */
-function getVia(proxyPort: number, url: string, auth: string | undefined = AUTH) {
+function getVia(proxyPort: number, url: string, auth: string | null = AUTH) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = request({
       host: "127.0.0.1",
@@ -137,7 +212,7 @@ function getVia(proxyPort: number, url: string, auth: string | undefined = AUTH)
       path: url,
       headers: {
         Host: new URL(url).host,
-        ...(auth === undefined ? {} : { "Proxy-Authorization": auth }),
+        ...(auth === null ? {} : { "Proxy-Authorization": auth }),
       },
     });
     req.on("response", (res) => {
@@ -155,14 +230,41 @@ const PUBLIC = { "example.com": ["93.184.216.34"] };
 describe("credentials", () => {
   it("CONNECT without credentials → 407, with no lookup and no connection", async () => {
     const p = await startProxy({ answers: PUBLIC });
-    expect((await connectVia(p.port, "example.com:443", undefined)).status).toBe(407);
+    expect((await connectVia(p.port, "example.com:443", null)).status).toBe(407);
     expect(p.lookups).toEqual([]);
     expect(p.connections).toEqual([]);
   });
 
+  // Review 2026-11-15: the per-audit credentials are for the proxy only and never reach the site.
+  it("plain HTTP: the upstream request carries no Proxy-Authorization", async () => {
+    const p = await startProxy({ answers: PUBLIC });
+    expect((await getVia(p.port, "http://example.com/")).status).toBe(200);
+    expect(upstreamHeaders).toHaveLength(1);
+    expect(upstreamHeaders[0]?.["proxy-authorization"]).toBeUndefined();
+    const sent = JSON.stringify(upstreamHeaders[0]);
+    expect(sent).not.toContain(CREDS.password);
+    expect(sent).not.toContain(AUTH.slice("Basic ".length));
+  });
+
+  it("a revoked audit's open tunnel is cut", async () => {
+    const p = await startProxy({ answers: PUBLIC });
+    const tunnel = await openTunnel(p.port);
+    expect(await echo(tunnel, "ping")).toBe("ping");
+    p.registry.revoke("audit-a");
+    expect(await writeExpectingCut(tunnel, "after revoke")).toEqual({ closed: true, received: "" });
+  });
+
+  it("an expired audit's open tunnel is cut (before any sweep)", async () => {
+    const p = await startProxy({ answers: PUBLIC });
+    const tunnel = await openTunnel(p.port);
+    expect(await echo(tunnel, "ping")).toBe("ping");
+    p.advance(60_000);
+    expect(await writeExpectingCut(tunnel, "after expiry")).toEqual({ closed: true, received: "" });
+  });
+
   it("plain HTTP without credentials → 407", async () => {
     const p = await startProxy({ answers: PUBLIC });
-    expect((await getVia(p.port, "http://example.com/", undefined)).status).toBe(407);
+    expect((await getVia(p.port, "http://example.com/", null)).status).toBe(407);
     expect(p.connections).toEqual([]);
   });
 
@@ -263,6 +365,16 @@ describe("per-audit request and byte caps", () => {
     expect((await getVia(p.port, "http://example.com/")).status).toBe(403);
     expect(p.registry.usage("audit-a")?.capped.requests).toBe(true);
     expect(p.connections).toHaveLength(2);
+  });
+
+  // Review 2026-11-15: the cap also applies inside a transfer, not only between requests.
+  it("the byte cap stops a transfer mid-stream", async () => {
+    const p = await startProxy({ answers: PUBLIC, caps: { maxRequests: 100, maxBytes: 100 } });
+    const tunnel = await openTunnel(p.port);
+    // 60 bytes up and 60 echoed back: 120 counted, over the 100-byte cap.
+    expect(await echo(tunnel, "a".repeat(60))).toBe("a".repeat(60));
+    expect(await writeExpectingCut(tunnel, "b".repeat(10))).toEqual({ closed: true, received: "" });
+    expect(p.registry.usage("audit-a")?.capped.bytes).toBe(true);
   });
 
   it("the byte cap refuses further requests and sets the cap flag", async () => {

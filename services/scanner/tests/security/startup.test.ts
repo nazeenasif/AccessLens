@@ -1,8 +1,8 @@
-// scanner startup safety tests (task T044; implementation T085, the scanner config, wired by its
-// main.ts). ADR-0001 Amendment 4, proposal test 3. The process must refuse to start, exiting
-// non-zero on its own (not by timeout), with a message naming the offending variables. Cases:
-// tests/support/startup-refusal-cases.ts. Required in CI: scripts/assert-required-tests.mjs lists
-// every case's title.
+// scanner startup safety tests (task T044; implementation T198, the scanner startup refusal in
+// main.ts, which T085's config keeps). ADR-0001 Amendment 4, proposal test 3. The process must
+// refuse to start, exiting non-zero on its own (not by timeout), with a message naming the
+// offending variables. Cases: tests/support/startup-refusal-cases.ts. Required in CI:
+// scripts/assert-required-tests.mjs lists every case's title.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
