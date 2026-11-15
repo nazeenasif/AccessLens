@@ -64,6 +64,11 @@ Accepted cluster:
    No AI key or evidence-signing secret is present in `scanner` or `egress-proxy`.
    `PROXY_CONTROL_TOKEN` (≥ 32 random bytes) only authenticates scanner → proxy control calls.
 
+   *Note 2026-11-14 (owner decision, T050 review)*: `egress-proxy` also receives
+   `SCAN_TOTAL_TIMEOUT_MS`, which isn't a secret. It comes from the same `.env` value as the
+   scanner's (`${SCAN_TOTAL_TIMEOUT_MS:-60000}`), so the proxy's per-audit credential expiry
+   (§2) always matches the scanner's total audit timeout. The T014 Compose test checks this.
+
    - **NL-1** is enforced by Docker. `scanner` is attached only to internal networks, so
      Chromium has no route to the internet, the host, or metadata endpoints. Its only way out is
      `egress-proxy`.

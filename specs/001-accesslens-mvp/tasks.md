@@ -99,6 +99,7 @@ CI.
 - [X] T008 [P] Configure Vitest projects (unit, integration, security per workspace) in
   `vitest.workspace.ts`.
   - *Done 2026-10-23*: projects are defined in **`vitest.config.ts` (`test.projects`)** instead of `vitest.workspace.ts`, because Vitest deprecated the workspace file in 3.2. `passWithNoTests` is on while layers are still empty.
+  - *Note 2026-11-15*: the `security` project's `testTimeout` is 20 s, above the T044 startup tests' 8 s `spawnSync` limit, so a slow spawn under parallel load is judged by the 8 s rule, not Vitest's 5 s default.
 - [X] T009 [P] Scaffold `packages/shared/package.json` (exact `zod@4.6.7`, `ipaddr.js@2.5.0`) and
   `packages/shared/src/index.ts`.
 - [X] T010 [P] Scaffold `services/egress-proxy/package.json` (no browser dependencies) and
@@ -127,6 +128,7 @@ CI.
   - `web` has `read_only: true` with `tmpfs` only for `/tmp` and the Next.js runtime cache, and
     no volumes (ADR-0002 §6);
   - one replica each.
+  - *Note 2026-11-14 (owner decision, T050 review)*: `egress-proxy` now receives `SCAN_TOTAL_TIMEOUT_MS` (allowlist entry added). A new test checks that it comes from the same `.env` value as the scanner's. It was shown failing before `docker-compose.yml` changed (ADR-0001 §1 note).
 
   Confirm it fails.
   - *Note 2026-11-13 (test mode, ADR-0001 Amendment 4)*: extend with the proposal test 6 checks: the base `docker-compose.yml` mentions no `ACCESSLENS_TEST_*` variable. The overlay itself is checked by T195. **Add these checks to the `test:assert` required list when written.**
@@ -306,10 +308,11 @@ disabled throughout.
   - `ACCESSLENS_TEST_FIXTURE_SUBNET` must parse and must not overlap the four production subnets.
   - *Done 2026-11-13*: written test-first (committed in `ec138cf`); 52 tests, including the canonical-entry cases from the review. Green with T190.
   - *Review 2026-11-14*: added tests for the mode-only `isTestModeEnabled` (scanner). Red until T190 adds the export.
-- [ ] T190 Implement `packages/shared/src/test-mode.ts` (config parsing shared by web, scanner, and
+- [X] T190 Implement `packages/shared/src/test-mode.ts` (config parsing shared by web, scanner, and
   egress-proxy), making T189 pass.
   - *Done 2026-11-13*: `parseTestModeConfig`, exported from the package index. Only the exact `true` enables test mode. Allowlist entries must be canonical host names (lowercase ASCII labels, no trailing dot, nothing trimmed or lowercased) and not IP addresses. The subnet must be an IPv4 CIDR overlapping none of the four production subnets. Test mode on with either value missing is an error naming the variable. T189 52/52. Mutation check: 16/17 caught. A port entry is still rejected, but by the IP-literal check (colon), so its error message calls it an IP address (see PHR 44). *Review 2026-11-14*: a dedicated port rule now runs first: `name:digits` with exactly one colon → "includes a port; give the host name only". A new T189 case asserts the message names the port and not an IP address, and it fails with the port rule disabled. T189 53/53.
   - *Reopened 2026-11-14*: add the mode-only `isTestModeEnabled(env)` (same exact-`true` rule; reads nothing else), making the new T189 cases pass. Unticked until then.
+  - *Done 2026-11-15*: `isTestModeEnabled` added, and `parseTestModeConfig` uses it; T189 67/67. Re-ticked.
 - [X] T191 [P] Write test-allowance tests in `packages/shared/tests/security/test-allowance.test.ts`
   (proposal test 2):
   - an allowlisted host resolving inside `172.30.50.0/24` → allowed;
@@ -321,14 +324,16 @@ disabled throughout.
   `packages/shared/src/url-policy/resolve-and-check.ts`, making T191 pass. The G0 suite must stay
   green and unchanged.
   - *Done 2026-11-13*: optional third argument `allowance?: TestAllowance`. With no allowance the code path is unchanged. An allowlisted host, matched exactly, must have ALL answers as canonical IPv4 inside the fixture subnet; IP-literal hosts are still refused before DNS. `isIpLiteral` is now exported for T190. T191 51/51; G0 74/74. Mutation check: every allowance rule is caught, including a test allowance leaking into the no-allowance path.
-- [ ] T041 [P] Write credential-registry tests in
+- [X] T041 [P] Write credential-registry tests in
   `services/egress-proxy/tests/unit/credentials.test.ts`: register/revoke; unknown or revoked →
   407; auto-expiry after `SCAN_TOTAL_TIMEOUT_MS`; per-audit byte and request counters.
-- [ ] T042 [P] Write control-endpoint tests in `services/egress-proxy/tests/unit/control.test.ts`:
+  - *Added 2026-11-15 (mutation gap)*: valid credentials under a non-Basic scheme → 407.
+- [X] T042 [P] Write control-endpoint tests in `services/egress-proxy/tests/unit/control.test.ts`:
   - a missing or wrong `PROXY_CONTROL_TOKEN` → 401 (constant-time compare);
   - read-only per-audit views; no other audit's credentials are ever returned;
   - rate-limited.
-- [ ] T043 [P] Write proxy behavior tests in
+  - *Added 2026-11-15 (mutation gap)*: secrets are compared only by the shared `src/secret-compare.ts` (`secretEquals`, SHA-256 digests + `timingSafeEqual`). `tests/unit/secret-compare.test.ts` has its direct tests and source checks: both `control.ts` and `credentials.ts` must use it, and neither may compare secrets with `===`, `!==`, or `.equals(`.
+- [X] T043 [P] Write proxy behavior tests in
   `services/egress-proxy/tests/integration/proxy.test.ts`:
   - `CONNECT` only to :443, HTTP only to :80;
   - IPv4-only resolve-once;
@@ -340,24 +345,29 @@ disabled throughout.
     - in test mode, a non-allowlisted **public** host is refused;
     - an allowlisted host resolving outside `172.30.50.0/24` is refused;
     - outside test mode, `ACCESSLENS_TEST_ALLOWLIST` is ignored.
-- [ ] T044 [P] Write startup safety tests in `services/egress-proxy/tests/security/startup.test.ts`
+  - *Fix 2026-11-14 (owner decision)*: the `connectVia`/`getVia` helpers take `auth: string | null = AUTH`, and the two no-credential cases pass `null`. Before the fix, passing `undefined` triggered the default, so those cases sent valid credentials.
+  - *Added 2026-11-15 (mutation gaps)*: the plain-HTTP upstream request carries no `Proxy-Authorization`; a revoked audit's open tunnel is cut; an expired audit's open tunnel is cut before any sweep; the byte cap stops a transfer mid-stream.
+- [X] T044 [P] Write startup safety tests in `services/egress-proxy/tests/security/startup.test.ts`
   and `services/scanner/tests/security/startup.test.ts`: the process exits non-zero if
   `EGRESS_TEST_ALLOWLIST` is set outside `NODE_ENV=test`, or if `PROXY_CONTROL_TOKEN` is missing.
   - *Note 2026-11-13 (test mode, proposal test 3)*: the variable is renamed `ACCESSLENS_TEST_ALLOWLIST`. Also: exit non-zero when `ACCESSLENS_TEST_MODE=true` together with `SCAN_ENABLED=true`, and when any `ACCESSLENS_TEST_*` variable is set without `NODE_ENV=test`. **Add these startup-refusal tests to the `test:assert` required list when written** (the web half is T193).
   - *Note 2026-11-14 (owner decision)*: `SCAN_ENABLED` stays web-only (ADR-0001 §1, T014 unchanged). The scanner/proxy refusal of test mode with `SCAN_ENABLED=true` is kept as protection against a stray variable. The scanner reads only `ACCESSLENS_TEST_MODE` (`isTestModeEnabled`) and refuses whenever `ACCESSLENS_TEST_ALLOWLIST` or `ACCESSLENS_TEST_FIXTURE_SUBNET` is set. The cases are in `tests/support/startup-refusal-cases.ts`, and every one is required in `test:assert`.
-- [ ] T045 [P] Write the range-sync test `packages/shared/tests/unit/firewall-sync.test.ts`:
+  - *Added 2026-11-15*: egress-proxy refuses a `PROXY_CONTROL_TOKEN` shorter than 32 characters (ADR-0001 §1). 14 startup cases; `test:assert` requires 106.
+- [X] T045 [P] Write the range-sync test `packages/shared/tests/unit/firewall-sync.test.ts`:
   `ops/firewall/nonpublic-ipv4.txt` equals `NON_PUBLIC_IPV4_RANGES` from T038.
-- [ ] T046 [P] Write proxy logging tests in `services/egress-proxy/tests/unit/logging.test.ts`:
+- [X] T046 [P] Write proxy logging tests in `services/egress-proxy/tests/unit/logging.test.ts`:
   one `proxy.audit_summary` per audit (requests, bytes, blocked count, cap flags) and
   `proxy.blocked` (reason, hashed host). The serialized logs contain no URLs, paths, query
   strings, or tokens (research R14).
   - *Note 2026-11-14*: `hostHash` must be HMAC-SHA256 with a random per-process key. The tests check that it isn't plain `sha256(host)` and stays stable within the process. `Proxy-Authorization` is redacted (R14 note). Contract: `contracts/internal-egress-proxy.md`.
+  - *Added 2026-11-15 (mutation gap)*: `hostHash` differs between two separate processes for the same host (the key is random per process).
 - [ ] T047 **Decision OD-8b (where G1 runs)**: choose and provision the Linux host or runner
   (Docker Engine plus iptables control) for G1, and record it in
   `specs/001-accesslens-mvp/plan.md` (the OD-8 row) and in the ADR-0003 addendum.
-- [ ] T048 Implement `services/egress-proxy/src/credentials.ts` (T041).
-- [ ] T049 Implement `services/egress-proxy/src/control.ts` (T042).
-- [ ] T050 Implement `services/egress-proxy/src/proxy.ts`:
+- [X] T048 Implement `services/egress-proxy/src/credentials.ts` (T041).
+- [X] T049 Implement `services/egress-proxy/src/control.ts` (T042).
+  - *Note 2026-11-14*: `400` for a malformed body, a duplicate audit, or a username already in use; audit IDs `[A-Za-z0-9_-]{1,128}` (contract §1 dated addition).
+- [X] T050 Implement `services/egress-proxy/src/proxy.ts`:
   - uses `isPublicIPv4`/`resolve-and-check` from `packages/shared`;
   - connects to the validated IP;
   - 80/443 only;
@@ -367,12 +377,13 @@ disabled throughout.
 
   Makes T043 pass.
   - *Note 2026-11-13*: the test allowlist is `ACCESSLENS_TEST_ALLOWLIST`. In test mode the proxy serves **only** allowlisted hosts resolving into `ACCESSLENS_TEST_FIXTURE_SUBNET`, using the T192 allowance. Every other host is refused (ADR-0001 Amendment 4).
-- [ ] T051 Implement `services/egress-proxy/src/main.ts` (config validation from T044, starts
+- [X] T051 Implement `services/egress-proxy/src/main.ts` (config validation from T044, starts
   the proxy and control listeners on the `scan-egress` address).
   - *Note 2026-11-13*: config validation uses `packages/shared/src/test-mode.ts` (T190) and applies the T044 startup refusals.
-- [ ] T052 Implement `services/egress-proxy/src/logger.ts` (pino with the R14 redaction set) and
+  - *Note 2026-11-14*: validation lives in `src/config.ts`. Control port `3129`; rate limit 100 requests per 10 s window (contract §1 dated addition). `SCAN_TOTAL_TIMEOUT_MS` sets the credential expiry. `PROXY_CONTROL_TOKEN` must also be at least 32 characters (ADR-0001 §1).
+- [X] T052 Implement `services/egress-proxy/src/logger.ts` (pino with the R14 redaction set) and
   emit the R14 proxy events from `proxy.ts`/`credentials.ts`, making T046 pass.
-- [ ] T198 Implement the scanner startup refusal in `services/scanner/src/main.ts`, making the
+- [X] T198 Implement the scanner startup refusal in `services/scanner/src/main.ts`, making the
   seven scanner cases of T044 (`tests/support/startup-refusal-cases.ts`) pass. Uses
   `isTestModeEnabled` from T190 and reads no other test-mode variable. Depends on T190.
   - *Added 2026-11-14 (owner decision)*: split out of T085 so the required startup tests can go
@@ -434,6 +445,7 @@ disabled throughout.
     ordered **before** the unit that starts the Compose stack, so the rules exist before
     `egress-proxy` opens any connection; it re-applies the rules and the conntrack flush at
     every boot.
+  - *Partial 2026-11-14 (owner scope)*: only the range file is done, generated by `scripts/generate-nl2-ranges.mjs` (`npm run firewall:ranges`), making T045 pass. `install-nl2.sh` and the remaining scripts are still open; no firewall rule was run or installed. Stays unticked.
 - [ ] T058 [P] Write G1 test `tests/g1/nl1-no-direct-route.test.ts`: from inside `scanner`, a
   direct TCP connection to a public IP fails, and connections to `169.254.169.254` and RFC 1918
   targets fail.

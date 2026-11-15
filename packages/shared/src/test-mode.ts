@@ -64,10 +64,18 @@ function parseFixtureSubnet(value: string | undefined): string {
   return value;
 }
 
+/**
+ * The mode-only check, for the scanner (review 2026-11-14): true only when ACCESSLENS_TEST_MODE is
+ * exactly "true". It reads no other variable and validates nothing else.
+ */
+export function isTestModeEnabled(env: Record<string, string | undefined>): boolean {
+  return env[TEST_MODE_VAR] === "true";
+}
+
 /** Reads the test-mode settings. Throws, naming the variable, if test mode is on and invalid. */
 export function parseTestModeConfig(env: Record<string, string | undefined>): TestModeConfig {
   // Only the exact string "true" enables test mode.
-  if (env[TEST_MODE_VAR] !== "true") return { enabled: false };
+  if (!isTestModeEnabled(env)) return { enabled: false };
   return {
     enabled: true,
     allowlist: parseAllowlist(env[TEST_ALLOWLIST_VAR]),

@@ -40,6 +40,18 @@ and this file is corrected.
 - **Values**: the window length and budget come from configuration chosen in T049/T051; the tests
   inject them.
 
+**Dated addition 2026-11-14 (T049/T051, owner-approved)**:
+- **Control port**: `3129`, on `172.30.30.30` only (the proxy listener stays on `3128`).
+- **Rate limit**: a fixed window of **10 s** with a budget of **100 requests**, shared by every
+  caller. That is enough for the scanner (about three control calls per audit, at most
+  `SCAN_CONCURRENCY` audits at once), and a token guesser gets at most 10 attempts a second.
+- **`400`**: `POST /audits/{auditId}/credentials` with a malformed body (not JSON, not an object,
+  over 4 KiB, or `username`/`password` not a non-empty string of at most 256 characters, or a
+  `username` containing `:`), a duplicate `auditId`, or a `username` already registered for
+  another audit. The registry is left unchanged. The rate limit and the token check still come
+  first, so an unauthenticated caller gets `429` or `401`, never `400`.
+- **Audit IDs**: `[A-Za-z0-9_-]{1,128}`. Any other path segment matches no route → `404`.
+
 ## 2. Proxy listener
 
 - **Authentication**: `Proxy-Authorization: Basic base64(username:password)` with currently
@@ -96,3 +108,5 @@ variables, for the cases in `tests/support/startup-refusal-cases.ts` (T044, requ
   variable without `NODE_ENV=test` is also refused.
 - **Scanner only**: it reads only `ACCESSLENS_TEST_MODE` (`isTestModeEnabled`), and refuses
   whenever `ACCESSLENS_TEST_ALLOWLIST` or `ACCESSLENS_TEST_FIXTURE_SUBNET` is set at all.
+- *Dated addition 2026-11-15*: `egress-proxy` also refuses to start when `PROXY_CONTROL_TOKEN` is
+  shorter than 32 characters (ADR-0001 §1: at least 32 random bytes; T044 case).

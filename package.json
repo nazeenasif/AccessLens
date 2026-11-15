@@ -33,6 +33,7 @@
     "test:wcag": "vitest run --project integration services/scanner/tests/integration/wcag-fixtures.test.ts",
     "bench:axe": "npm run bench -w services/scanner",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
+    "firewall:ranges": "node scripts/generate-nl2-ranges.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:secrets:diff": "node scripts/check-secrets-diff.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspaces --if-present",
