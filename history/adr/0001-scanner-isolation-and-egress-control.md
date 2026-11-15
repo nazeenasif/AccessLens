@@ -9,7 +9,8 @@
   2026-10-23, resolves OD-12. Amendment 2 to §4 (`SYS_CHROOT` for the scanner) — Accepted
   2026-11-08, resolves OD-13. Amendment 3 to §3 (four more non-public IPv4 ranges; one range list
   for proxy and firewall) — Accepted 2026-11-13. Amendment 4 to §1, §2 and §6 (test mode,
-  separate from `SCAN_ENABLED`) — Accepted 2026-11-13.
+  separate from `SCAN_ENABLED`) — Accepted 2026-11-13. Amendment 5 to §3 / Amendment 1 (how the
+  install script checks that conntrack helpers are off) — Accepted 2026-11-15.
 - **Status:** Accepted (2026-10-22, by the project owner, after review revision 1). Resolves
   plan Open Decisions **OD-1** and **OD-5** and narrows **OD-2**. Acceptance approves the
   design only: **no security gate (G0/G1) has passed**; gates pass only with recorded execution
@@ -231,6 +232,47 @@ Accepted cluster:
    > *Validation*: the list is covered by T035 and the T036 G0 suite. The firewall side is
    > covered by T045 and T057, and on the live stack by G1. Accepting this amendment doesn't
    > mean G0 or G1 has passed.
+
+   > **Amendment 5 to §3 (Amendment 1's "Conntrack helpers" bullet) — ACCEPTED (2026-11-15, by
+   > the project owner; T057 test review).** Amendment 1's text is kept unchanged as the record;
+   > where they conflict, this amendment governs.
+   >
+   > **Finding.** Amendment 1 verifies helpers are off by reading
+   > `net.netfilter.nf_conntrack_helper=0`. Kernel commit `b118509076b3` ("netfilter: conntrack:
+   > remove the nf_conntrack_helper sysctl and modparam toggles", Linux 6.0) removed that sysctl
+   > along with automatic helper assignment. On Ubuntu 24.04 (kernel 6.8) the sysctl doesn't
+   > exist, so a literal `=0` check would always fail closed there.
+   >
+   > **Decision.** The install script treats conntrack helpers as **off** only if:
+   > - `net.netfilter.nf_conntrack_helper` reads `0`; **or**
+   > - the sysctl is missing **and** the running kernel (`uname -r`, major.minor) is **6.0 or
+   >   later**, where automatic assignment no longer exists.
+   >
+   > It **fails closed**, exiting non-zero with no partial rule set, if:
+   > - the sysctl is missing on a kernel older than 6.0, or the kernel version can't be parsed;
+   > - the sysctl reads anything other than `0`;
+   > - on **any** kernel, a raw-table rule attaches a helper explicitly (`-j CT --helper`,
+   >   from `iptables -t raw -S`), because on 6.0+ that is the only way a helper can be
+   >   assigned.
+   >
+   > *Validation*: `tests/config/nl2-firewall.test.ts` (T057, no root; fake `uname`, `sysctl`
+   > and raw-table output), required in `test:assert`; on the live host, T184 (G1). Accepting
+   > this amendment doesn't mean G1 has passed.
+   >
+   > *Note 2026-11-15 (owner decision; Docker bridge subnets)*:
+   > - **Default pools are already covered.** `install-nl2.sh` adds a drop for every Docker
+   >   bridge subnet it finds at install time. Docker's default address pools fall inside ranges
+   >   already on the list (`172.17.0.0/16`–`172.31.0.0/16` inside `172.16.0.0/12`, and
+   >   `192.168.0.0/16`), so with defaults those rules add no coverage.
+   > - **Custom pools need a rerun.** A host whose daemon uses custom `default-address-pools`
+   >   outside the listed ranges must rerun `install-nl2.sh` after any new network is created;
+   >   until then that network's subnet isn't dropped.
+   > - **Unit order.** `accesslens-networks.service` creates the Compose networks first
+   >   (`docker compose up --no-start`). `accesslens-nl2.service` runs
+   >   `After=docker.service accesslens-networks.service` and `Before=accesslens-stack.service`,
+   >   and the stack unit `Requires=` it (T128/T129).
+   > - **G1 records the pools.** The G1 evidence (T066) records the daemon's address-pool
+   >   configuration.
 
 4. **Browser sandboxing (resolves OD-5)**:
    - Chromium runs as the non-root `pwuser` with Playwright's `seccomp_profile.json`, keeping

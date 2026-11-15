@@ -9,6 +9,7 @@ import {
   caseTitle,
 } from "../packages/shared/tests/security/destination-cases.ts";
 import { STARTUP_REFUSAL_CASES, startupTitle } from "../tests/support/startup-refusal-cases.ts";
+import { NL2_ALL_TITLES } from "../tests/support/nl2-cases.ts";
 
 // Gate G0 (M1 decision Q4): the suite's structural checks and one test per published case, so
 // a dropped, renamed, or skipped G0 case fails CI. Titles come from the case list itself.
@@ -30,8 +31,12 @@ export const STARTUP_REQUIRED = ["egress-proxy", "scanner"].flatMap((service) =>
   STARTUP_REFUSAL_CASES[service].map((c) => `startup.test.ts :: ${startupTitle(service, c)}`),
 );
 
+// NL-2 firewall scripts (task T057; ADR-0001 §3 with Amendments 1, 3 and 5; owner decision
+// 2026-11-15): every test in nl2-firewall.test.ts. Titles come from tests/support/nl2-cases.ts.
+export const NL2_REQUIRED = NL2_ALL_TITLES.map((title) => `nl2-firewall.test.ts :: ${title}`);
+
 // Docker- and gitleaks-backed tests that MUST run and pass in CI (file :: exact test title),
-// plus the G0 suite and the startup refusals.
+// plus the G0 suite, the startup refusals and the NL-2 firewall scripts.
 export const REQUIRED = [
   "web-binding.test.ts :: accepts TCP on the public address",
   "web-binding.test.ts :: refuses TCP on the scan-ctl address",
@@ -53,6 +58,7 @@ export const REQUIRED = [
   "diff-secret-scan.test.ts :: fails on a committed 48-byte base64 secret",
   ...G0_REQUIRED,
   ...STARTUP_REQUIRED,
+  ...NL2_REQUIRED,
 ];
 
 // The ONLY tests allowed to be skipped: inverse "tool unavailable" branches (skipped precisely
