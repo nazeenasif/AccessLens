@@ -273,6 +273,30 @@ Accepted cluster:
    >   and the stack unit `Requires=` it (T128/T129).
    > - **G1 records the pools.** The G1 evidence (T066) records the daemon's address-pool
    >   configuration.
+   >
+   > *Note 2026-11-16 (owner decision; re-running install)*:
+   > - **The stack must be stopped first.** `install-nl2.sh` deletes the tagged rules before it
+   >   inserts the new set, so a re-run while the stack is up would leave a moment with no NL-2
+   >   drops.
+   > - **Install enforces it.** It refuses (exit non-zero, no change) while any container of
+   >   the `accesslens` Compose project is running
+   >   (`docker ps --filter label=com.docker.compose.project=accesslens`).
+   > - **What doesn't count.** Containers that only exist, such as those from
+   >   `accesslens-networks.service`'s `docker compose up --no-start` or ones that have been
+   >   stopped, don't count.
+   > - **Tests.** `tests/config/nl2-firewall.test.ts` covers this, and it is required in
+   >   `test:assert`.
+   >
+   > *Note 2026-11-16 (owner decision; restart policy)*:
+   > - **Docker must never start the scan path before `accesslens-nl2.service`.** With
+   >   `restart: unless-stopped`, the daemon would restart `scanner` and `egress-proxy` at boot
+   >   after a crash or power loss, before the NL-2 rules exist. Install would then refuse,
+   >   because containers are running, and no rules would be installed at all.
+   > - **The fix.** `scanner` and `egress-proxy` have `restart: "no"`. `web` keeps
+   >   `unless-stopped`; it isn't on the scan path.
+   > - **systemd owns the lifecycle.** `accesslens-stack.service` starts the stack and restarts it
+   >   after a crash, always `After=` and `Requires=accesslens-nl2.service` (T128/T129).
+   > - **Tests.** The T014 Compose test requires these restart policies.
 
 4. **Browser sandboxing (resolves OD-5)**:
    - Chromium runs as the non-root `pwuser` with Playwright's `seccomp_profile.json`, keeping

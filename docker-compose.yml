@@ -121,7 +121,9 @@ services:
     mem_limit: 1.5g
     cpus: 1.5
     pids_limit: 512
-    restart: unless-stopped
+    # Never started by Docker on its own (e.g. at boot), only by accesslens-stack.service after
+    # accesslens-nl2.service has installed the NL-2 rules (ADR-0001 Amendment 5 note 2026-11-16).
+    restart: "no"
 
   egress-proxy:
     build:
@@ -149,7 +151,8 @@ services:
     mem_limit: 512m
     cpus: 0.5
     pids_limit: 128
-    restart: unless-stopped
+    # See scanner: systemd, not Docker, owns the scan path's lifecycle.
+    restart: "no"
 
 networks:
   public:

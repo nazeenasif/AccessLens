@@ -1,0 +1,21 @@
+# AccessLens NL-2 egress firewall rules (task T057; ADR-0001 §3 with Amendments 1 and 5).
+# Installs the rules at every boot, after Docker and after accesslens-networks.service has created
+# the Compose networks (`docker compose up --no-start`), and before accesslens-stack.service starts
+# the stack. accesslens-stack.service has After= and Requires= on this unit, so the stack never
+# starts without the rules (both units are defined in T128/T129).
+#
+# The path below assumes the repository is checked out at /opt/accesslens; T129 confirms it.
+[Unit]
+Description=AccessLens NL-2 egress firewall rules
+After=docker.service accesslens-networks.service
+Requires=docker.service
+Wants=accesslens-networks.service
+Before=accesslens-stack.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/accesslens/ops/firewall/install-nl2.sh
+
+[Install]
+WantedBy=multi-user.target
