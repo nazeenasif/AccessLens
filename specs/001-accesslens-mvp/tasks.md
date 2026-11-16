@@ -566,10 +566,11 @@ disabled throughout.
     self-check script `fixtures/pages/dom-limit/verify-counts.mjs`;
   - `two-frames-30k-30k.html`;
   - `shadow-root-large.html`.
-- [ ] T071 [P] Create the test-only fixture server `tests/support/fixture-server.ts`, serving
+- [X] T071 [P] Create the test-only fixture server `tests/support/fixture-server.ts`, serving
   `fixtures/` and the redirect/slow endpoints for T063 and T069.
   - *Note 2026-11-13*: the fixture server runs on the `test-fixtures` network (`172.30.50.0/24`) in `docker-compose.test.yml` (T196), under a host name listed in `ACCESSLENS_TEST_ALLOWLIST`.
-- [ ] T195 [P] Write the overlay config test `tests/config/compose-test-overlay.test.ts`
+  - *Done 2026-11-16*: `tests/support/fixture-server.ts` serves `fixtures/` under `/fixtures/` (no traversal, dotfiles or directory listings), plus `/ok`, `/redirect/chain/<n>`, `/redirect/to-private`, `/redirect/to-host/<host>`, `/slow/delay/<ms>`, `/slow/hang`, `/slow/load` and `/healthz`. GET and HEAD only, and `close()` ends hanging requests. `fixtures/README.md` describes the layout. T077 adds its target-response routes later.
+- [X] T195 [P] Write the overlay config test `tests/config/compose-test-overlay.test.ts`
   (proposal test 6; ADR-0003 Addendum D):
   - `docker-compose.test.yml` defines `test-fixtures` as `172.30.50.0/24`;
   - only the fixture server and `egress-proxy` attach to it, and `scanner` keeps internal networks only;
@@ -582,9 +583,15 @@ disabled throughout.
     - per-service test variables: `scanner` gets `ACCESSLENS_TEST_MODE` only, `egress-proxy` all three, `web` none or all three (T194). The values are checked with the shared `test-mode.ts` parser;
     - the fixture server runs non-root, with `cap_drop: [ALL]`, no `cap_add`, and `expose: ["80"]`;
     - 11 tests, all required.
-- [ ] T196 Create `docker-compose.test.yml` per ADR-0003 Addendum D (fixture server from T071,
+- [X] T196 Create `docker-compose.test.yml` per ADR-0003 Addendum D (fixture server from T071,
   test-mode variables, `test-fixtures` network), making T195 pass. T150 later adds the mock
   OpenRouter to this file.
+  - *Done 2026-11-16*: `docker-compose.test.yml` sets up four things:
+    - the `fixtures` service: pinned Node image, uid 1000, read-only, `cap_drop: [ALL]`, no-new-privileges, port 80, the alias `fixtures.test` at 172.30.50.10, and read-only mounts of `tests/support` and `fixtures`;
+    - `egress-proxy` in test mode, with all three variables and 172.30.50.30;
+    - `scanner` with `NODE_ENV=test` and `ACCESSLENS_TEST_MODE` only;
+    - an internal `test-fixtures` network, 172.30.50.0/24.
+  T195 passes, and a mutation check catches 23/23 rule breaks. In a live smoke run (throwaway project, torn down), the scanner container reached `fixtures.test` only through the proxy (200), got 407 without credentials and 403 for a non-allowlisted host, and couldn't reach the fixture server directly.
 - [ ] T072 [P] Write mapping unit tests in `services/scanner/tests/unit/map-axe.test.ts`:
   - violations → `violation`; incomplete → `manual_review`;
   - category from `cat.*`; `isBestPractice` rule;

@@ -1,0 +1,61 @@
+# AccessLens test-mode overlay (task T196; ADR-0001 Amendment 4, ADR-0003 Addendum D).
+# Use ONLY for local and CI test runs, never on a deployment host:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml ...
+# It adds the test-only `test-fixtures` network and the fixture server (T071), and switches the
+# scan path to test mode, in which egress-proxy serves only the allowlisted fixture host and
+# refuses everything else, the internet included. It never enables live scanning, never
+# publishes a scan-path port, and never attaches scanner to a non-internal network.
+# Checked by tests/config/compose-test-overlay.test.ts (T195) and the T186 guard.
+
+services:
+  fixtures:
+    # The pinned Node image used by the services; the server needs only Node built-ins.
+    image: node:24.22.1-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c
+    command: ["node", "/srv/tests/support/fixture-server.ts"]
+    environment:
+      FIXTURE_PORT: "80"
+    expose: ["80"]
+    # The image's non-root `node` user. Docker lets unprivileged processes bind port 80 inside a
+    # container, so no capability is needed.
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./tests/support:/srv/tests/support:ro
+      - ./fixtures:/srv/fixtures:ro
+    networks:
+      test-fixtures:
+        ipv4_address: 172.30.50.10
+        aliases:
+          - fixtures.test
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+
+  egress-proxy:
+    environment:
+      NODE_ENV: test
+      ACCESSLENS_TEST_MODE: "true"
+      ACCESSLENS_TEST_ALLOWLIST: fixtures.test
+      ACCESSLENS_TEST_FIXTURE_SUBNET: 172.30.50.0/24
+    networks:
+      test-fixtures:
+        ipv4_address: 172.30.50.30
+
+  scanner:
+    # The scanner reads only ACCESSLENS_TEST_MODE and refuses to start if the other two test
+    # variables are set (T044/T198).
+    environment:
+      NODE_ENV: test
+      ACCESSLENS_TEST_MODE: "true"
+
+networks:
+  test-fixtures:
+    # Internal: the fixture server has no route out, and is reached only through egress-proxy.
+    internal: true
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 172.30.50.0/24
