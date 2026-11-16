@@ -13,7 +13,11 @@ export const BRIDGES: Record<string, string> = {
   "accesslens_scan-egress": "172.30.30.0/24",
   bridge: "172.17.0.0/16",
   other_dualstack: "172.18.0.0/16,fd00:1::/64",
+  // Review 2026-11-16: a custom pool equal to a listed range; its rule must appear only once.
+  custom_pool: "192.168.0.0/16",
 };
+/** A bridge subnet above that is exactly a listed range. */
+export const DUPLICATE_BRIDGE_SUBNET = "192.168.0.0/16";
 /** Host addresses the fake `ip -4 -o addr show` reports, in order. */
 export const HOST_ADDRS = [
   "127.0.0.1/8",
@@ -50,6 +54,8 @@ export type Nl2Scenario = {
   conntrackEmpty?: boolean;
   dockerUser?: string[];
   input?: string[];
+  /** Containers the fake `docker ps` knows about (review 2026-11-16). Default: none. */
+  containers?: { name: string; project: string; state: "running" | "created" | "exited" }[];
 };
 
 export type FailClosedCase = { name: string; scenario: Nl2Scenario; message: RegExp };
@@ -109,6 +115,42 @@ export const NL2_FAIL_CLOSED_CASES: FailClosedCase[] = [
     name: "conntrack isn't installed",
     scenario: { noConntrack: true },
     message: /\bconntrack\b/,
+  },
+  {
+    // Review 2026-11-16 (ADR-0001 Amendment 5 note): install deletes the tagged rules before
+    // inserting the new set, so it refuses while any AccessLens container is running.
+    name: "an AccessLens container is running",
+    scenario: {
+      containers: [
+        { name: "accesslens-egress-proxy-1", project: "accesslens", state: "running" },
+        { name: "accesslens-web-1", project: "accesslens", state: "created" },
+      ],
+    },
+    message: /running/,
+  },
+];
+
+/** install-nl2.sh must accept these: no AccessLens container is running (review 2026-11-16). */
+export const NL2_CONTAINERS_ALLOWED_CASES: { name: string; scenario: Nl2Scenario }[] = [
+  {
+    name: "AccessLens containers exist but were never started (docker compose up --no-start)",
+    scenario: {
+      containers: [
+        { name: "accesslens-web-1", project: "accesslens", state: "created" },
+        { name: "accesslens-scanner-1", project: "accesslens", state: "created" },
+        { name: "accesslens-egress-proxy-1", project: "accesslens", state: "created" },
+      ],
+    },
+  },
+  {
+    name: "AccessLens containers are stopped",
+    scenario: {
+      containers: [{ name: "accesslens-egress-proxy-1", project: "accesslens", state: "exited" }],
+    },
+  },
+  {
+    name: "only another Compose project's container is running",
+    scenario: { containers: [{ name: "other-db-1", project: "other", state: "running" }] },
   },
 ];
 
@@ -243,6 +285,7 @@ export const NL2_TITLES = {
   stale: "deletes stale tagged rules first, never an untagged one",
   failClosed: (c: FailClosedCase) => `fails closed when ${c.name}`,
   helpersOff: (name: string) => `installs when ${name}`,
+  containersAllowed: (name: string) => `installs when ${name}`,
   uninstall: "uninstall removes only accesslens-nl2-tagged rules, and a second run is harmless",
   verifyPasses: "verify passes on the expected rule set, making only read-only calls",
   verifyAfterInstall: "verify passes right after install",
@@ -269,6 +312,7 @@ export const NL2_ALL_TITLES: string[] = [
   NL2_TITLES.stale,
   ...NL2_FAIL_CLOSED_CASES.map(NL2_TITLES.failClosed),
   ...NL2_HELPERS_OFF_CASES.map((c) => NL2_TITLES.helpersOff(c.name)),
+  ...NL2_CONTAINERS_ALLOWED_CASES.map((c) => NL2_TITLES.containersAllowed(c.name)),
   NL2_TITLES.uninstall,
   NL2_TITLES.verifyPasses,
   NL2_TITLES.verifyAfterInstall,

@@ -32,6 +32,7 @@
 //     // expires the credentials after SCAN_TOTAL_TIMEOUT_MS).
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { inspect } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { createControlHandler } from "../../../egress-proxy/src/control.ts";
 import { CredentialRegistry } from "../../../egress-proxy/src/credentials.ts";
@@ -97,6 +98,29 @@ describe("register", () => {
     expect(error).toBeInstanceOf(Error);
     expect(String((error as Error).message)).toContain("401");
     expect(String((error as Error).message)).not.toContain(TOKEN);
+  });
+
+  // Review 2026-11-16: the request itself fails (nothing listens on the port), so fetch rejects
+  // before any HTTP status exists. Neither the error nor anything it carries contains the token.
+  it("rejects when the control endpoint can't be reached, without exposing the token", async () => {
+    const closed = createServer();
+    await new Promise<void>((done) => closed.listen(0, "127.0.0.1", () => done()));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise<void>((done) => closed.close(() => done()));
+    const client = createProxyClient({ controlUrl: `http://127.0.0.1:${port}`, token: TOKEN });
+    for (const call of [
+      () => client.register("audit-a"),
+      () => client.revoke("audit-a"),
+      () => client.usage("audit-a"),
+    ]) {
+      const error = await call().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      // inspect() includes the message, the stack and any `cause` chain.
+      expect(inspect(error, { depth: 10 })).not.toContain(TOKEN);
+    }
   });
 });
 

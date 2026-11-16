@@ -47,6 +47,36 @@ iptables)
     *) ;;
   esac ;;
 docker)
+  # `docker ps`: FAKE_CONTAINERS holds "name:project:state" entries. Only running containers are
+  # listed unless -a/--all is given; a label=com.docker.compose.project=<p> filter is honoured.
+  if [ "$1" = "ps" ]; then
+    shift
+    all=0
+    project=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -a|--all) all=1 ;;
+        --filter|-f)
+          case "$2" in label=com.docker.compose.project=*) project=${2#label=com.docker.compose.project=} ;; esac
+          shift ;;
+        --filter=*)
+          v=${1#--filter=}
+          case "$v" in label=com.docker.compose.project=*) project=${v#label=com.docker.compose.project=} ;; esac ;;
+        --format) shift ;;
+      esac
+      shift
+    done
+    for c in $FAKE_CONTAINERS; do
+      cname=${c%%:*}
+      rest=${c#*:}
+      cproject=${rest%%:*}
+      cstate=${rest#*:}
+      if [ -n "$project" ] && [ "$cproject" != "$project" ]; then continue; fi
+      if [ "$all" = 0 ] && [ "$cstate" != "running" ]; then continue; fi
+      echo "$cname"
+    done
+    exit 0
+  fi
   if [ "$1 $2" = "network ls" ]; then
     for entry in $FAKE_NETWORKS; do echo "${entry%%=*}"; done
     exit 0

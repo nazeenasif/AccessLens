@@ -20,7 +20,9 @@
 //   - pre-checks: `iptables -S DOCKER-USER` succeeds; actual outbound subnet = Compose value;
 //     conntrack helpers are off (ADR-0001 Amendment 5): `sysctl -n net.netfilter.nf_conntrack_helper`
 //     is 0, or the sysctl is missing and `uname -r` is 6.0 or later; and no rule in
-//     `iptables -t raw -S` uses `-j CT --helper`; `conntrack` is on PATH;
+//     `iptables -t raw -S` uses `-j CT --helper`; `conntrack` is on PATH; and (review 2026-11-16)
+//     no AccessLens container is running: `docker ps --filter
+//     label=com.docker.compose.project=accesslens` (running only, never `-a`) lists nothing;
 //   - rule form, exactly: -s <outbound> -d <dest> -m comment --comment accesslens-nl2 -j DROP;
 //   - order: the DOCKER-USER drops are rules 1..n, destinations in this order: the ranges (file
 //     order), then the IPv4 bridge subnets (`docker network ls` order), skipping exact duplicates;
@@ -48,9 +50,11 @@ import { NON_PUBLIC_IPV4_RANGES } from "../../packages/shared/src/url-policy/ip-
 import {
   BRIDGES,
   DOCKER_USER_BEFORE,
+  DUPLICATE_BRIDGE_SUBNET,
   HOST_ADDRS,
   INPUT_BEFORE,
   NL2_FAIL_CLOSED_CASES,
+  NL2_CONTAINERS_ALLOWED_CASES,
   NL2_HELPERS_OFF_CASES,
   NL2_SCRIPTS,
   NL2_TITLES as T,
@@ -163,6 +167,7 @@ function sandbox(s: Nl2Scenario = {}) {
     FAKE_HELPER: s.helper === null ? "" : (s.helper ?? "0"),
     FAKE_KERNEL: s.kernel ?? "6.8.0-45-generic",
     FAKE_CONNTRACK_EMPTY: s.conntrackEmpty ? "1" : "0",
+    FAKE_CONTAINERS: (s.containers ?? []).map((c) => `${c.name}:${c.project}:${c.state}`).join(" "),
     HOME: posix(root),
     ...(WIN ? { SYSTEMROOT: process.env.SYSTEMROOT ?? "C:\\Windows" } : {}),
   };
@@ -207,6 +212,10 @@ describe("install-nl2.sh: the rules it installs", () => {
     const chain = sb.read("DOCKER-USER");
     expect(chain.slice(1, 1 + DESTS.length)).toEqual(DESTS.map((d) => tagged("DOCKER-USER", d)));
     expect(chain.filter(isTagged)).toHaveLength(DESTS.length); // no duplicates
+    // Review 2026-11-16: a bridge subnet equal to a listed range gets one rule, not two.
+    expect(chain.filter((l) => l === tagged("DOCKER-USER", DUPLICATE_BRIDGE_SUBNET))).toHaveLength(
+      1,
+    );
     expect(chain.filter((l) => !isTagged(l))).toEqual(DOCKER_USER_BEFORE); // the rest untouched
     expect(chain.join("\n")).not.toMatch(/fd00:/); // IPv4 subnets only
   });
@@ -292,12 +301,17 @@ describe("install-nl2.sh: idempotent replace", () => {
 
 describe("install-nl2.sh: pre-checks fail closed, with no partial rule set", () => {
   const STALE = tagged("DOCKER-USER", "198.51.100.77/32");
+  // Review 2026-11-16: INPUT also holds a stale tagged rule, so a delete in either chain before
+  // the pre-checks is caught.
+  const STALE_INPUT = tagged("INPUT", "198.51.100.78/32");
   it.each(NL2_FAIL_CLOSED_CASES.map((c) => [T.failClosed(c), c] as const))("%s", (_title, c) => {
-    // A stale tagged rule is present wherever DOCKER-USER exists: a failed pre-check must leave it.
+    // Stale tagged rules are present (in DOCKER-USER wherever it exists, and always in INPUT): a
+    // failed pre-check must leave them, and everything else, untouched.
+    const input = [...INPUT_BEFORE, STALE_INPUT];
     const sb = sandbox(
       c.scenario.noDockerUser
-        ? c.scenario
-        : { ...c.scenario, dockerUser: [...DOCKER_USER_BEFORE, STALE] },
+        ? { ...c.scenario, input }
+        : { ...c.scenario, dockerUser: [...DOCKER_USER_BEFORE, STALE], input },
     );
     const before = sb.snapshot();
     const result = sb.run(INSTALL);
@@ -307,6 +321,7 @@ describe("install-nl2.sh: pre-checks fail closed, with no partial rule set", () 
     expect(mutations(sb.calls()), "no rule added or removed").toEqual([]);
     expect(sb.calls().filter((l) => l.startsWith("conntrack -D"))).toEqual([]);
     expect(sb.snapshot()).toEqual(before);
+    expect(sb.read("INPUT")).toContain(STALE_INPUT);
   });
 });
 
@@ -317,6 +332,18 @@ describe("install-nl2.sh: conntrack helpers count as off (ADR-0001 Amendment 5)"
       const sb = sandbox(c.scenario);
       const result = sb.run(INSTALL);
       expect(result.status, result.stderr).toBe(0);
+      expect(sb.read("DOCKER-USER").filter(isTagged)).toHaveLength(DESTS.length);
+    },
+  );
+});
+
+describe("install-nl2.sh: no AccessLens container may be running (ADR-0001 Amendment 5 note)", () => {
+  it.each(NL2_CONTAINERS_ALLOWED_CASES.map((c) => [T.containersAllowed(c.name), c] as const))(
+    "%s",
+    (_title, c) => {
+      const sb = sandbox(c.scenario);
+      const result = sb.run(INSTALL);
+      expect(result.status, output(result)).toBe(0);
       expect(sb.read("DOCKER-USER").filter(isTagged)).toHaveLength(DESTS.length);
     },
   );

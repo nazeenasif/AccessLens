@@ -25,6 +25,7 @@ type Service = {
   cpus?: number | string;
   pids_limit?: number;
   profiles?: string[];
+  restart?: string | boolean;
   scale?: number;
   deploy?: { replicas?: number };
 };
@@ -229,6 +230,16 @@ describe("docker-compose.yml (T014)", () => {
     expect(value("egress-proxy"), "egress-proxy SCAN_TOTAL_TIMEOUT_MS").toBeDefined();
     expect(value("egress-proxy")).toBe(value("scanner"));
     expect(String(value("scanner"))).toMatch(/^\$\{SCAN_TOTAL_TIMEOUT_MS[:}]/);
+  });
+
+  // 2026-11-16 (owner decision; ADR-0001 Amendment 5 note): Docker must never start the scan path
+  // on its own, e.g. at boot after a crash, before accesslens-nl2.service has installed the NL-2
+  // rules. systemd (accesslens-stack.service) owns the scan path's lifecycle. web keeps its policy.
+  it('scanner and egress-proxy have restart: "no"; web keeps unless-stopped', () => {
+    for (const name of ["scanner", "egress-proxy"]) {
+      expect(svc(name).restart, `${name} restart`).toBe("no");
+    }
+    expect(svc("web").restart, "web restart").toBe("unless-stopped");
   });
 
   it("runs exactly one replica of each service", () => {
