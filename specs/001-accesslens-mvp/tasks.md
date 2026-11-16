@@ -185,6 +185,7 @@ CI.
   - `scripts/` and the CI config (once T026 exists) never set `SCAN_ENABLED=true`;
   - the `SCAN_ENABLED` check added in US1 (T116, also asserted by the T101 health test) treats
     an unset or empty value, or anything other than the exact string `true`, as **disabled**.
+  - *Extended 2026-11-16 (owner decision; ADR-0001 Amendment 4)*: a new test checks every `docker-compose*.yml`, the test overlay included, for `SCAN_ENABLED` set to anything but `false`. All five non-skipped T186 tests are now required in `test:assert`.
     This assertion is added when T116 lands; until then it is skipped with a reason naming
     T116.
 
@@ -576,6 +577,11 @@ disabled throughout.
   - no published ports for `scanner` or `egress-proxy`;
   - no `SCAN_ENABLED` setting.
   **Add this test to the `test:assert` required list when written.**
+  - *Tests written 2026-11-16*: `tests/config/compose-test-overlay.test.ts`, checking the merged base + overlay view. It also holds the T014 note's base-file check (the base mentions no `ACCESSLENS_TEST_*`). All 7 tests are required in `test:assert` (157 required in total). Red until T196; checked against a throwaway overlay.
+  - *Added 2026-11-16 (owner decisions)*:
+    - per-service test variables: `scanner` gets `ACCESSLENS_TEST_MODE` only, `egress-proxy` all three, `web` none or all three (T194). The values are checked with the shared `test-mode.ts` parser;
+    - the fixture server runs non-root, with `cap_drop: [ALL]`, no `cap_add`, and `expose: ["80"]`;
+    - 11 tests, all required.
 - [ ] T196 Create `docker-compose.test.yml` per ADR-0003 Addendum D (fixture server from T071,
   test-mode variables, `test-fixtures` network), making T195 pass. T150 later adds the mock
   OpenRouter to this file.
@@ -667,6 +673,7 @@ disabled throughout.
   - NDJSON event order `queued` → `loading` → `analyzing` → exactly one terminal event;
   - queue full → 503 `SCANNER_BUSY`;
   - findings carry no `evidence`.
+  - *Note 2026-11-16 (owner decision)*: "re-validates the URL" means the scanner re-runs the URL policy only (`validateUrl`: scheme, credentials, port, length, IP literals). The scanner has no DNS, so DNS-based private-destination blocking stays at the egress proxy (`resolveAndCheck`).
 - [ ] T188 [P] Write scanner contract conformance tests in
   `services/scanner/tests/integration/scanner-contract.test.ts`, using a JSON Schema 2020-12
   validator against `specs/001-accesslens-mvp/contracts/scanner-api.openapi.yaml` and

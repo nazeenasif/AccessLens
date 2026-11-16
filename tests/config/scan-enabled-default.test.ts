@@ -69,6 +69,31 @@ describe("SCAN_ENABLED defaults to disabled (T186)", () => {
     expect(checked).toEqual(expect.arrayContaining(["web", "web-dev"]));
   });
 
+  // 2026-11-16 (ADR-0001 Amendment 4: "The T186 guard is extended to every docker-compose*.yml"):
+  // no Compose file, the test overlay included, may enable scanning.
+  it("no docker-compose*.yml file sets SCAN_ENABLED to anything but false", () => {
+    const files = readdirSync(".").filter((f) => /^docker-compose.*\.ya?ml$/.test(f));
+    expect(files, "the base file is always checked").toContain("docker-compose.yml");
+    for (const file of files) {
+      const text = readFileSync(file, "utf8");
+      expect(ENABLE_PATTERN.test(text), `${file} sets SCAN_ENABLED=true`).toBe(false);
+      const compose = parse(text, { merge: true }) as {
+        services?: Record<string, { environment?: Record<string, unknown> | string[] }>;
+      } | null;
+      for (const [name, svc] of Object.entries(compose?.services ?? {})) {
+        const env = svc.environment;
+        if (!env) continue;
+        const value = Array.isArray(env)
+          ? env.find((e) => e.startsWith("SCAN_ENABLED="))?.split("=")[1]
+          : env.SCAN_ENABLED;
+        if (value === undefined) continue;
+        expect(isSafeComposeValue(value), `${file} ${name}: SCAN_ENABLED=${String(value)}`).toBe(
+          true,
+        );
+      }
+    }
+  });
+
   it("scripts and CI config never set SCAN_ENABLED=true", () => {
     const files = [...walk("scripts"), ...walk(".github")];
     const offenders = files.filter((f) => ENABLE_PATTERN.test(readFileSync(f, "utf8")));

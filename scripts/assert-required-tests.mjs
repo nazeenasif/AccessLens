@@ -35,6 +35,35 @@ export const STARTUP_REQUIRED = ["egress-proxy", "scanner"].flatMap((service) =>
 // 2026-11-15): every test in nl2-firewall.test.ts. Titles come from tests/support/nl2-cases.ts.
 export const NL2_REQUIRED = NL2_ALL_TITLES.map((title) => `nl2-firewall.test.ts :: ${title}`);
 
+// Test-mode Compose overlay (task T195; ADR-0003 Addendum D) and the T014 note's base-file check
+// (proposal test 6): every test in compose-test-overlay.test.ts.
+const OVERLAY = "compose-test-overlay.test.ts";
+export const OVERLAY_REQUIRED = [
+  `${OVERLAY} :: defines the test-fixtures network as 172.30.50.0/24`,
+  `${OVERLAY} :: attaches only the fixture server and egress-proxy to test-fixtures`,
+  `${OVERLAY} :: keeps scanner on internal networks only`,
+  `${OVERLAY} :: sets NODE_ENV=test for scanner and egress-proxy`,
+  `${OVERLAY} :: publishes no ports for scanner or egress-proxy`,
+  `${OVERLAY} :: has no SCAN_ENABLED setting`,
+  `${OVERLAY} :: gives scanner ACCESSLENS_TEST_MODE=true and no other test variable`,
+  `${OVERLAY} :: gives egress-proxy all three test variables, valid, with the fixture subnet`,
+  `${OVERLAY} :: gives web either no test variable or all three, valid, with the fixture subnet (T194)`,
+  `${OVERLAY} :: runs the fixture server non-root, with cap_drop ALL, no added capabilities, on port 80`,
+  `${OVERLAY} :: the base docker-compose.yml mentions no ACCESSLENS_TEST_* variable`,
+];
+
+// Scanning-default guard (task T186; owner decision 2026-11-16, ADR-0001 Amendment 4): its
+// checks, including the extension to every docker-compose*.yml.
+const T186 = "scan-enabled-default.test.ts";
+export const SCAN_DEFAULT_REQUIRED = [
+  `${T186} :: guard logic rejects unsafe values (self-check)`,
+  `${T186} :: .env.example sets SCAN_ENABLED=false`,
+  `${T186} :: no Compose service or profile can enable scanning by default`,
+  `${T186} :: no docker-compose*.yml file sets SCAN_ENABLED to anything but false`,
+  // Built in two parts: this file is under scripts/, and the guard rejects the literal text.
+  `${T186} :: scripts and CI config never set SCAN_ENABLED` + "=true",
+];
+
 // Docker- and gitleaks-backed tests that MUST run and pass in CI (file :: exact test title),
 // plus the G0 suite, the startup refusals and the NL-2 firewall scripts.
 export const REQUIRED = [
@@ -59,6 +88,8 @@ export const REQUIRED = [
   ...G0_REQUIRED,
   ...STARTUP_REQUIRED,
   ...NL2_REQUIRED,
+  ...OVERLAY_REQUIRED,
+  ...SCAN_DEFAULT_REQUIRED,
 ];
 
 // The ONLY tests allowed to be skipped: inverse "tool unavailable" branches (skipped precisely
